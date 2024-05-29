@@ -8,7 +8,7 @@ module TestPlugin ( TotalityEvidence, CheckTotality(..), assertTotality, TotalCl
 
 import Data.Kind
 
-data TotalityEvidence (c :: k -> Constraint) where UnsafeTotalityEvidence :: TotalityEvidence c
+data TotalityEvidence (c :: k -> Constraint) where UnsafeTotalityEvidence :: TotalityEvidence c deriving Show
 
 assertTotality :: TotalityEvidence c
 assertTotality = UnsafeTotalityEvidence

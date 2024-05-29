@@ -1,9 +1,11 @@
 {-# OPTIONS_GHC -fplugin=TestPlugin.Plugin #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE ExplicitForAll #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main (main) where
 
 import Data.Proxy
@@ -14,6 +16,14 @@ class MyTotalClass (a :: Bool) where
 
 instance TotalClass MyTotalClass where
   totalityEvidence = assertTotality
+--
+f :: forall (a :: Bool). Proxy a -> Bool
+f x = isTrue x
+
+main :: IO ()
+main = do
+  putStrLn $ show $ f (Proxy :: Proxy True)
+  putStrLn "Test suite not yet implemented."
 
 -- f1 :: a -> m a
 -- f1 x = return x
@@ -21,10 +31,7 @@ instance TotalClass MyTotalClass where
 -- f2 :: a -> a -> a
 -- f2 = (+)
 
-g x = x * 2
-
-f :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
-f x = isTrue x
-
-main :: IO ()
-main = putStrLn "Test suite not yet implemented."
+--test :: forall k (c :: k -> Constraint). TotalClass c => String
+--test = show $ totalityEvidence @k @c
+--
+--test2 = test @Bool @MyTotalClass

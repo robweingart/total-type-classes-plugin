@@ -35,19 +35,11 @@ totalClassName = do
 
 wantedCtToTotal :: Ct -> TcPluginM ((EvTerm, Ct), Ct)
 wantedCtToTotal ct = do
-  (targetClass, targetArgTy) <- case getClassPredTys_maybe $ ctPred ct of
-    Just (cls, [ty]) -> do
-      output "target cls:" cls
-      output "target tyvar kind:" $ typeKind ty
-      return (cls, typeKind ty)
-    Just _ -> fail "Class has wrong arity"
+  targetTyConTy  <- case getClassPredTys_maybe $ ctPred ct of
+    Just (cls, _) -> return $ mkTyConTy $ classTyCon cls
     Nothing -> fail "Not a class constraint"
-  let targetTyCon = classTyCon targetClass
   totalClass <- totalClassName >>= tcLookupClass
-  output "totalClass:" totalClass
-  let totalTyCon = classTyCon totalClass
-  let predType = mkTyConApp totalTyCon [targetArgTy, mkTyConTy targetTyCon] 
-  output "predType:" predType
+  let predType = mkTyConApp (classTyCon totalClass) [typeKind targetTyConTy, targetTyConTy] 
   newCt <- mkNonCanonical <$> newWanted (ctLoc ct) predType
   let fakeEvTerm = EvExpr $ mkImpossibleExpr predType
   return ((fakeEvTerm, ct), newCt)

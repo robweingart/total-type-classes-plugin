@@ -8,13 +8,19 @@ module TestPlugin ( TotalityEvidence, CheckTotality(..), assertTotality, TotalCl
 
 import Data.Kind
 
-data TotalityEvidence (c :: k -> Constraint) where UnsafeTotalityEvidence :: TotalityEvidence c deriving Show
+class IsClassKind c where
 
-assertTotality :: TotalityEvidence c
+instance IsClassKind Constraint where
+
+instance IsClassKind c => IsClassKind (a -> c)
+
+data TotalityEvidence c where UnsafeTotalityEvidence :: TotalityEvidence c deriving Show
+
+assertTotality :: IsClassKind ck => TotalityEvidence (c :: ck)
 assertTotality = UnsafeTotalityEvidence
 
-class CheckTotality (c :: k -> Constraint) where
+class IsClassKind ck => CheckTotality (c :: ck) where
   checkTotality :: TotalityEvidence c
 
-class TotalClass (c :: k -> Constraint) where
+class IsClassKind ck => TotalClass (c :: ck) where
   totalityEvidence :: TotalityEvidence c

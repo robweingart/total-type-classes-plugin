@@ -62,7 +62,7 @@ library
     exposed-modules:  TestPlugin, TestPlugin.Plugin
 
     -- Modules included in this library but not exported.
-    other-modules: TestPlugin.Solver, TestPlugin.Rewriter
+    other-modules: TestPlugin.Solver, TestPlugin.Rewriter, TestPlugin.Placeholder
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

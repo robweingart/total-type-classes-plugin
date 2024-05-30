@@ -6,9 +6,9 @@ import GHC.Tc.Plugin
 import GHC.Tc.Types.Evidence
 import GHC.Tc.Utils.Monad (TcPlugin (..), TcPluginSolveResult (..), mapAndUnzipM)
 import GHC.Tc.Types.Constraint (Ct, ctPred, mkNonCanonical, ctLoc)
-import Data.List (partition)
 import GHC.Core.Class (Class(..))
 import GHC.Core.Predicate (getClassPredTys_maybe)
+import TestPlugin.Placeholder (mkPlaceholder)
 
 totalTcPlugin :: [CommandLineOption] -> Maybe TcPlugin
 totalTcPlugin _ = Just $ 
@@ -18,14 +18,9 @@ totalTcPlugin _ = Just $
            , tcPluginStop = \_ -> return ()
            }
 
-canBeTotal :: Class -> Bool
-canBeTotal cls = case classTyVars cls of
-  [var] -> isAlgType (varType var) 
-  _ -> False
-
 canBeTotalCt :: Ct -> Bool
 canBeTotalCt ct = case getClassPredTys_maybe $ ctPred ct of
-  Just (cls, _) -> canBeTotal cls
+  Just (cls, _) -> all (isAlgType . varType) (classTyVars cls)
   Nothing -> False
 
 totalClassName :: TcPluginM Name
@@ -41,18 +36,13 @@ wantedCtToTotal ct = do
   totalClass <- totalClassName >>= tcLookupClass
   let predType = mkTyConApp (classTyCon totalClass) [typeKind targetTyConTy, targetTyConTy] 
   newCt <- mkNonCanonical <$> newWanted (ctLoc ct) predType
-  let fakeEvTerm = EvExpr $ mkImpossibleExpr predType
-  return ((fakeEvTerm, ct), newCt)
+  return ((mkPlaceholder predType, ct), newCt)
 
 solve :: () -> EvBindsVar -> [Ct] -> [Ct] -> TcPluginM TcPluginSolveResult
 solve () _ _ [] = do
-  tcPluginIO $ putStrLn "asked to rewrite givens, doing nothing"
   return $ TcPluginSolveResult [] [] []
 solve () _ _ wanteds = do
-  output "wanteds:" wanteds
-  let (maybeTotal, stillWanted) = partition canBeTotalCt wanteds
-  output "Skipped (non-ADT args or >1 arg):" stillWanted
-  (solvedCts, newCts) <- mapAndUnzipM wantedCtToTotal maybeTotal
+  (solvedCts, newCts) <- mapAndUnzipM wantedCtToTotal $ filter canBeTotalCt wanteds
   output "Adding TotalClass constraints:" newCts
   return $ TcPluginSolveResult 
     { tcPluginSolvedCts = solvedCts
@@ -62,4 +52,3 @@ solve () _ _ wanteds = do
 
 output :: Outputable a => String -> a -> TcPluginM ()
 output str x = tcPluginIO . putStrLn $ str ++ " " ++ showPprUnsafe x
-

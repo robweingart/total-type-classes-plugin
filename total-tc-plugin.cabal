@@ -62,7 +62,7 @@ library
     exposed-modules:  TestPlugin, TestPlugin.Plugin
 
     -- Modules included in this library but not exported.
-    -- other-modules:
+    other-modules: TestPlugin.Solver, TestPlugin.Rewriter
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -70,6 +70,7 @@ library
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.17.0.0
     build-depends: ghc
+    build-depends: syb
 
 
     -- Directories containing source files.

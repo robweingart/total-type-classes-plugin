@@ -20,6 +20,11 @@ instance TotalClass MyTotalClass where
 f :: forall (a :: Bool). Proxy a -> Bool
 f x = isTrue x
 
+f' :: forall (a :: Bool). MyTotalClass a => Bool -> Proxy a -> Bool
+f' True x = isTrue x
+f' False x = isTrue x && isTrue x
+
+
 main :: IO ()
 main = do
   putStrLn $ show $ f (Proxy :: Proxy True)

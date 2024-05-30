@@ -17,9 +17,8 @@ class MyTotalClass (a :: Bool) where
 instance TotalClass MyTotalClass where
   totalityEvidence = assertTotality
 --
-f :: forall (a :: Bool). Show String => Bool -> Proxy a -> Bool
-f True x = isTrue x
-f False x = isTrue x && isTrue x
+f :: forall (a :: Bool). Proxy a -> Bool
+f x = isTrue x
 
 f' :: forall (a :: Bool). (MyTotalClass a, Show String) => Bool -> Proxy a -> Bool
 f' True x = isTrue x

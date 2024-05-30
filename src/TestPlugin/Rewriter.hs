@@ -8,23 +8,24 @@ import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM, TcGblEnv (..))
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr))
 import GHC (LHsBindLR, GhcTc, HsBindLR (..), MatchGroup (..), MatchGroupTc (..), Match (..), AbsBinds (..), HsExpr (..), XXExprGhcTc (..), HsWrap (..))
-import GHC.Tc.Utils.Monad (getGblEnv)
+import GHC.Tc.Utils.Monad (getGblEnv, mapMaybeM)
 
-import Data.Generics (everywhereM, mkM, somewhere)
+import Data.Generics (everywhereM, mkM, mkT, somewhere, everywhere)
 import Control.Monad.State (StateT (runStateT), MonadTrans (lift), modify, when, unless)
 import GHC.Data.Bag (filterBagM)
 import TestPlugin.Placeholder (isPlaceholder, getPlaceholderPredType)
 import GHC.Tc.Utils.TcType (mkPhiTy)
 import GHC.Core.TyCo.Rep (Type(TyVarTy, AppTy, TyConApp, CoercionTy, CastTy), TyCoBinder (Named, Anon), Scaled (Scaled))
 import GHC.Hs.Syn.Type (hsExprType)
+import Data.Maybe (mapMaybe, fromMaybe)
 
 totalTcResultAction :: [CommandLineOption] -> ModSummary -> TcGblEnv -> TcM TcGblEnv
 totalTcResultAction _ _ gbl = do
     -- _ <- everywhereM (mkM printWrapper') (tcg_binds gbl) 
-    _ <- everywhereM (mkM printType) (tcg_binds gbl) 
-    _ <- everywhereM (mkM printVar) (tcg_binds gbl) 
-    _ <- everywhereM (mkM printUnique) (tcg_binds gbl) 
-    _ <- everywhereM (mkM printExpr) (tcg_binds gbl) 
+    --_ <- everywhereM (mkM printType) (tcg_binds gbl) 
+    --_ <- everywhereM (mkM printVar) (tcg_binds gbl) 
+    --_ <- everywhereM (mkM printUnique) (tcg_binds gbl) 
+    --_ <- everywhereM (mkM printExpr) (tcg_binds gbl) 
     forM_ (tcg_binds gbl) (printInnerBinds 0)
     (binds', ids) <- runStateT (everywhereM (mkM rewriteHsBindLR) (tcg_binds gbl)) emptyVarSet
     outputTcM "modified ids: " ids
@@ -51,15 +52,22 @@ rewriteHsBindLR b@(FunBind {fun_id=(L loc fid), fun_ext=wrapper }) = do
       --lift $ outputTcM "type after adding []: " newTy
       return b
     Just (wrapper', newArgTys) -> do
+      
       lift $ outputTcM "modifying fun: " fid
       modify (`extendVarSet` fid)
       lift $ outputTcM "old type: " $ varType fid
-      newTy <- lift $ updateFunType (varType fid) newArgTys
+      newTy <- lift $ updateFunType (varType fid) (wrapperBinders wrapper) newArgTys
       lift $ outputTcM "new type: " newTy
       let fid' = setVarType fid newTy
       lift $ printWrapper 0 wrapper'
       return b {fun_id=L loc fid', fun_ext=wrapper'}
 rewriteHsBindLR b = return b
+
+wrapperBinders :: HsWrapper -> [Var]
+wrapperBinders (WpCompose w1 w2) = wrapperBinders w1 ++ wrapperBinders w2
+wrapperBinders (WpTyLam var) = [var]
+wrapperBinders (WpEvLam var) = [var]
+wrapperBinders _ = []
 
 rewriteHsWrapper :: HsWrapper -> TcM (Maybe (HsWrapper, [PredType]))
 rewriteHsWrapper wrapper = do
@@ -97,7 +105,7 @@ addEvLams (WpCompose w1 w2) vars = if done1 then (w1' <.> w2, done1) else (w1' <
   where
     (w1', done1) = addEvLams w1 vars
     (w2', done2) = addEvLams w2 vars
-addEvLams w@(WpEvLam _) vars = (foldr ((<.>) . WpEvLam) w vars, True)
+--addEvLams w@(WpEvLam _) vars = (foldr ((<.>) . WpEvLam) w vars, True)
 addEvLams w@(WpLet _) vars = (foldr ((<.>) . WpEvLam) w vars, True)
 addEvLams w _ = (w, False)
 --addEvLams wrapper vars = do
@@ -112,19 +120,23 @@ addEvLams w _ = (w, False)
 --      return $ foldr ((<.>) . WpEvLam) w vars
 --    addHere w = return w
 
-updateFunType :: Type -> [PredType] -> TcM Type
-updateFunType ty predTys = do
-  forM_ predTys $ \case
-    --predTy -> outputTcM "pred: " predTy
-    --AppTy _ y -> outputTcM "ty var in pred: " y
-    TyConApp _ [TyVarTy var] -> outputTcM "ty var in pred: " $ varUnique var
-    _ -> return ()
-  forM_ bndrs $ \case
-    Named (Bndr var _) -> outputTcM "ty var in bndr: " $ varUnique var
-    _ -> return ()
-  return $ mkPiTys bndrs $ mkPhiTy predTys ty'
+updateFunType :: Type -> [Var] -> [PredType] -> TcM Type
+updateFunType ty wrapper_vars predTys = do
+  --forM_ predTys $ \case
+  --  --predTy -> outputTcM "pred: " predTy
+  --  --AppTy _ y -> outputTcM "ty var in pred: " y
+  --  TyConApp _ [TyVarTy var] -> outputTcM "ty var in pred: " $ varUnique var
+  --  _ -> return ()
+  --forM_ bndrs $ \case
+  --  Named (Bndr var _) -> outputTcM "ty var in bndr: " $ varUnique var
+  --  _ -> return ()
+  let predTys' = everywhere (mkT tyVarFor) predTys 
+  return $ mkPiTys bndrs $ mkPhiTy predTys' ty'
   where
     (bndrs, ty') = splitInvisPiTys ty
+    ty_vars = mapMaybe (\case { Named (Bndr var _) -> Just var; _ -> Nothing }) bndrs
+    var_pairs = zip wrapper_vars ty_vars
+    tyVarFor var = fromMaybe var (lookup var var_pairs)
 
 
 

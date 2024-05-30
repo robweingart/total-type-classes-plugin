@@ -17,17 +17,18 @@ class MyTotalClass (a :: Bool) where
 instance TotalClass MyTotalClass where
   totalityEvidence = assertTotality
 --
-f :: forall (a :: Bool). Proxy a -> Bool
-f x = isTrue x
+f :: forall (a :: Bool). Show String => Bool -> Proxy a -> Bool
+f True x = isTrue x
+f False x = isTrue x && isTrue x
 
-f' :: forall (a :: Bool). MyTotalClass a => Bool -> Proxy a -> Bool
+f' :: forall (a :: Bool). (MyTotalClass a, Show String) => Bool -> Proxy a -> Bool
 f' True x = isTrue x
 f' False x = isTrue x && isTrue x
 
 
 main :: IO ()
 main = do
-  putStrLn $ show $ f (Proxy :: Proxy True)
+  --putStrLn $ show $ f True (Proxy :: Proxy True)
   putStrLn "Test suite not yet implemented."
 
 -- f1 :: a -> m a

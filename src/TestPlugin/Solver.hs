@@ -30,7 +30,7 @@ totalClassName = do
 
 wantedCtToTotal :: Ct -> TcPluginM ((EvTerm, Ct), Ct)
 wantedCtToTotal ct = do
-  targetTyConTy  <- case getClassPredTys_maybe $ ctPred ct of
+  targetTyConTy <- case getClassPredTys_maybe $ ctPred ct of
     Just (cls, _) -> return $ mkTyConTy $ classTyCon cls
     Nothing -> fail "Not a class constraint"
   totalClass <- totalClassName >>= tcLookupClass

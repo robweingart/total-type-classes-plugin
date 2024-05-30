@@ -68,9 +68,7 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.17.0.0
-    build-depends: ghc
-    build-depends: syb
+    build-depends:    base ^>=4.17.0.0, ghc, syb, mtl, bytestring
 
 
     -- Directories containing source files.

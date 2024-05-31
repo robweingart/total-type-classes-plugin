@@ -32,25 +32,24 @@ totalTcResultAction :: [CommandLineOption] -> ModSummary -> TcGblEnv -> TcM TcGb
 totalTcResultAction _ _ gbl = do
   forM_ (tcg_binds gbl) (printInnerBinds 0)
   --outputTcM "type env: " $ tcg_type_env gbl
-  (gbl', allIds) <- runStateT (rewriteBinds gbl) emptyDNameEnv
-  gbl' <- getGblEnv
-  outputTcM "Final type env: " $ tcg_type_env gbl'
-  setGblEnv gbl'{tcg_binds = binds} $ do
+  gbl' <- rewriteBinds gbl
+  setGblEnv gbl' $ do
     typeEnv <- tcg_type_env <$> getGblEnv
+    outputTcM "Final type env: " $ typeEnv
     forM_ (nonDetNameEnvElts typeEnv) $ \case
       AnId resId -> do
         outputTcM "env var: " $ resId
         outputTcM "env unique: " $ varUnique resId
         outputTcM "env type: " $ varType resId
       _ -> return ()
-    forM_ allIds $ \(var, _) -> do
-      outputTcM "lookup var: " $ var
-      outputTcM "lookup unique: " $ varUnique var
-      res <- tcLookup (varName var)
-      case res of
-        AGlobal (AnId resId) -> do
-          outputTcM "lookup type: " $ varType resId
-        _ -> return ()
+    --forM_ allIds $ \(var, _) -> do
+    --  outputTcM "lookup var: " $ var
+    --  outputTcM "lookup unique: " $ varUnique var
+    --  res <- tcLookup (varName var)
+    --  case res of
+    --    AGlobal (AnId resId) -> do
+    --      outputTcM "lookup type: " $ varType resId
+    --    _ -> return ()
     getGblEnv
 
 rewriteIdTypes :: NameData -> Id -> Id
@@ -58,44 +57,38 @@ rewriteIdTypes ids id'
   | Just (id'', _) <- lookupDNameEnv ids (varName id') = id''
   | otherwise = id'
 
-rewriteBinds :: TcGblEnv -> TcStateM NameData TcGblEnv
+rewriteBinds :: TcGblEnv -> TcM TcGblEnv
 rewriteBinds gbl = do
   let binds = tcg_binds gbl
-  (binds', newIds) <- lift $ runStateT (everywhereM (mkM rewriteHsBindLR) binds) emptyDNameEnv
+  (binds', newIds) <- runStateT (everywhereM (mkM rewriteHsBindLR) binds) emptyDNameEnv
   forM_ newIds $ \(id', _) -> do
-   lift $ outputTcM "Modified id: " id'
-   lift $ outputTcM "Modified id type: " $ varType id'
-   lift $ outputTcM "Modified id unique: " $ varUnique id'
+   outputTcM "Modified id: " id'
+   outputTcM "Modified id type: " $ varType id'
+   outputTcM "Modified id unique: " $ varUnique id'
    return ()
-  modify (plusUDFM newIds)
-  gbl <- lift getGblEnv
-  --gbl'' <- if isEmptyDNameEnv newIds then return gbl' else do
-  --  lift $ outputTcM "updating type env with new ids: " $ varType . fst <$> toList newIds
-  --  gbl'' <- lift $ setGlobalTypeEnv gbl' (extendTypeEnvWithIds (tcg_type_env gbl') (fst <$> toList newIds))
-  --  forM_ newIds $ \(var, _) -> do
-  --    thing <- tcExtendGlobalEnv
-  --    lift $ outputTcM "new lookups: " $ varType . fst <$> toList newIds
-  --  return gbl''
-  ----lift $ outputTcM "new type env: " $ tcg_type_env gbl''
-  lift $ setGblEnv gbl{tcg_binds = binds'} $ tcExtendGlobalEnvImplicit (AnId . fst <$> toList newIds) $ do
-    binds'' <- rewriteCalls binds' newIds
-    forM_ newIds $ \(var, _) -> do
-      outputTcM "lookup' var: " $ var
-      outputTcM "lookup' unique: " $ varUnique var
-      res <- tcLookup (varName var)
-      case res of
-        AGlobal (AnId resId) -> do
-          outputTcM "lookup' type: " $ varType resId
-        _ -> return ()
-    return binds''
+  setGblEnv gbl{tcg_binds = binds'} $ tcExtendGlobalEnvImplicit (AnId . fst <$> toList newIds) $ do
+    gbl' <- getGblEnv
+    gbl'' <- rewriteCalls newIds gbl'
+    setGblEnv gbl'' $ do
+      forM_ newIds $ \(var, _) -> do
+        outputTcM "lookup' var: " $ var
+        outputTcM "lookup' unique: " $ varUnique var
+        res <- tcLookup (varName var)
+        case res of
+          AGlobal (AnId resId) -> do
+            outputTcM "lookup' type: " $ varType resId
+          _ -> return ()
+      getGblEnv
 
 
-rewriteCalls :: LHsBinds GhcTc -> NameData -> TcM (LHsBinds GhcTc)
-rewriteCalls binds ids
-  | isEmptyDNameEnv ids = return binds
+rewriteCalls :: NameData -> TcGblEnv -> TcM TcGblEnv
+rewriteCalls ids gbl
+  | isEmptyDNameEnv ids = return gbl
   | otherwise = do
-    binds' <- everywhereM (mkM (rewriteCallsInBind ids)) binds
-    fst <$> runStateT (rewriteBinds binds') ids
+    binds' <- everywhereM (mkM (rewriteCallsInBind ids)) (tcg_binds gbl)
+    setGblEnv gbl{tcg_binds = binds'} $ do
+      gbl' <- getGblEnv
+      rewriteBinds gbl'
 
 type TcStateM s a = StateT s TcM a
 

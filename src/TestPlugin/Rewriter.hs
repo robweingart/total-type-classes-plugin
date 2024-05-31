@@ -6,11 +6,11 @@ import Data.Foldable (forM_, Foldable (toList))
 
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcTyThing (AGlobal))
-import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr))
+import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr), EvBindMap, evBindMapBinds)
 import GHC (LHsBindLR, GhcTc, HsBindLR (..), AbsBinds (..), HsExpr (..), XXExprGhcTc (..), HsWrap (..), LHsBinds, Ghc, ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId))
 import Data.Generics (everywhereM, mkM, mkT, everywhere)
 import Control.Monad.State (StateT (runStateT), MonadTrans (lift), get, modify, when, unless, gets, State, runState)
-import GHC.Data.Bag (filterBagM)
+import GHC.Data.Bag (filterBagM, unionBags, Bag)
 import TestPlugin.Placeholder (isPlaceholder)
 import GHC.Tc.Utils.TcType (mkPhiTy)
 import GHC.Core.TyCo.Rep (Type(TyVarTy, TyConApp, CoercionTy, CastTy), TyCoBinder (Named, Anon), Scaled (Scaled))
@@ -140,15 +140,23 @@ updateFunType ty wrapper_vars predTys = do
     tyVarFor var = fromMaybe var (lookup var var_pairs)
 
 rewriteCallsInBind :: NameData -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
-rewriteCallsInBind ids b@(FunBind {fun_id=(L loc fid), fun_ext=wrapper }) = do
+rewriteCallsInBind ids b@(FunBind {fun_id=(L _ _), fun_ext=wrapper }) = do
   outputTcM "Rewriting calls in bind: " b
-  (bind', wanteds) <- captureConstraints $ everywhereM (mkM (rewriteCall ids)) b
+  (b', wanteds) <- captureConstraints $ everywhereM (mkM (rewriteCall ids)) b
   outputTcM "Captured constraints: " wanteds
   (wc, ebm) <- runTcS $ solveWanteds wanteds
   outputTcM "Resulting wc: " wc
   outputTcM "Resulting ebm: " ebm
   outputTcM "solved: " $ isSolvedWC wc
-  return bind'
+  let newEvBinds = evBindMapBinds ebm
+  (wrapper', changes) <- runStateT (everywhereM (mkM (addBindsToWpLet newEvBinds)) wrapper) 0
+  wrapper'' <- case changes of
+    0 -> return $ wrapper' <.> WpLet (EvBinds newEvBinds)
+    1 -> return wrapper'
+    _ -> fail "too many WpLet"
+  case b' of
+    fb@(FunBind {}) -> return fb{fun_ext=wrapper''}
+    _ -> fail "impossible"
 rewriteCallsInBind _ b = return b
 
 rewriteCall :: NameData -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
@@ -169,7 +177,13 @@ rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w (HsVar x (L l var)))))
   | otherwise = return expr
 rewriteCall _ expr = return expr
 
-
+addBindsToWpLet :: Bag EvBind -> HsWrapper -> TcStateM Int HsWrapper
+addBindsToWpLet _ (WpLet (TcEvBinds _)) = fail "Encountered unzonked TcEvBinds, this should not happen"
+addBindsToWpLet binds (WpLet (EvBinds binds')) = do
+  let newBinds = unionBags binds binds'
+  modify (+1)
+  return (WpLet (EvBinds newBinds))
+addBindsToWpLet _ w = return w
 
 printBndrTys :: Type -> TcM ()
 printBndrTys ty = do

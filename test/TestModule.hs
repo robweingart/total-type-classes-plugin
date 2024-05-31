@@ -28,7 +28,7 @@ f :: forall (a :: Bool). Proxy a -> Bool
 f x = isTrue x
 
 showF :: forall (a :: Bool). Proxy a -> String
-showF = undefined
+showF x = show $ f x
 
 
 data MyNat = Z | S MyNat deriving Show

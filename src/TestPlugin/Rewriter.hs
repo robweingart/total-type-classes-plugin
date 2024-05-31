@@ -9,7 +9,7 @@ import GHC.Tc.Types (TcM, TcGblEnv (..), TcTyThing (AGlobal))
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr), EvBindMap, evBindMapBinds)
 import GHC (LHsBindLR, GhcTc, HsBindLR (..), AbsBinds (..), HsExpr (..), XXExprGhcTc (..), HsWrap (..), LHsBinds, Ghc, ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId))
 import Data.Generics (everywhereM, mkM, mkT, everywhere)
-import Control.Monad.State (StateT (runStateT), MonadTrans (lift), get, modify, when, unless, gets, State, runState)
+import Control.Monad.State (StateT (runStateT), MonadTrans (lift), get, modify, when, unless, put, State, runState)
 import GHC.Data.Bag (filterBagM, unionBags, Bag)
 import TestPlugin.Placeholder (isPlaceholder)
 import GHC.Tc.Utils.TcType (mkPhiTy)
@@ -17,37 +17,50 @@ import GHC.Core.TyCo.Rep (Type(TyVarTy, TyConApp, CoercionTy, CastTy), TyCoBinde
 import GHC.Hs.Syn.Type (hsExprType)
 import Data.Maybe (mapMaybe, fromMaybe, isJust)
 import GHC.Tc.Utils.Monad (captureConstraints, setGblEnv, getGblEnv)
-import GHC.Tc.Utils.Env (tcLookup, setGlobalTypeEnv)
+import GHC.Tc.Utils.Env (tcLookup, setGlobalTypeEnv, tcExtendGlobalEnv, tcExtendGlobalEnvImplicit)
 import GHC.Types.TypeEnv (extendTypeEnv, extendTypeEnvWithIds)
 import GHC.Types.Unique.DFM (plusUDFM)
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
 import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf))
 import GHC.Tc.Solver (solveWanteds)
 import GHC.Tc.Solver.Monad (runTcS)
-import GHC.Tc.Types.Constraint (isSolvedWC)
+import GHC.Tc.Types.Constraint (isSolvedWC, WantedConstraints, isEmptyWC)
 
 type NameData = DNameEnv (Id, [PredType])
 
 totalTcResultAction :: [CommandLineOption] -> ModSummary -> TcGblEnv -> TcM TcGblEnv
 totalTcResultAction _ _ gbl = do
-  --forM_ (tcg_binds gbl) (printInnerBinds 0)
-  outputTcM "type env: " $ tcg_type_env gbl
-  (binds', allIds) <- runStateT (rewriteBinds (tcg_binds gbl)) emptyDNameEnv
-  let gbl' = gbl {tcg_binds = binds'}
-  gbl'' <- setGlobalTypeEnv gbl' (extendTypeEnvWithIds (tcg_type_env gbl') (fst <$> toList allIds))
-  setGblEnv gbl'' $ do
-    outputTcM "modified ids: " allIds
-    let binds'' = everywhere (mkT (rewriteIdTypes allIds)) binds'
-    gbl''' <- getGblEnv
-    return gbl''' {tcg_binds=binds''}
+  forM_ (tcg_binds gbl) (printInnerBinds 0)
+  --outputTcM "type env: " $ tcg_type_env gbl
+  (gbl', allIds) <- runStateT (rewriteBinds gbl) emptyDNameEnv
+  gbl' <- getGblEnv
+  outputTcM "Final type env: " $ tcg_type_env gbl'
+  setGblEnv gbl'{tcg_binds = binds} $ do
+    typeEnv <- tcg_type_env <$> getGblEnv
+    forM_ (nonDetNameEnvElts typeEnv) $ \case
+      AnId resId -> do
+        outputTcM "env var: " $ resId
+        outputTcM "env unique: " $ varUnique resId
+        outputTcM "env type: " $ varType resId
+      _ -> return ()
+    forM_ allIds $ \(var, _) -> do
+      outputTcM "lookup var: " $ var
+      outputTcM "lookup unique: " $ varUnique var
+      res <- tcLookup (varName var)
+      case res of
+        AGlobal (AnId resId) -> do
+          outputTcM "lookup type: " $ varType resId
+        _ -> return ()
+    getGblEnv
 
 rewriteIdTypes :: NameData -> Id -> Id
 rewriteIdTypes ids id'
   | Just (id'', _) <- lookupDNameEnv ids (varName id') = id''
   | otherwise = id'
 
-rewriteBinds :: LHsBinds GhcTc -> TcStateM NameData (LHsBinds GhcTc)
-rewriteBinds binds = do
+rewriteBinds :: TcGblEnv -> TcStateM NameData TcGblEnv
+rewriteBinds gbl = do
+  let binds = tcg_binds gbl
   (binds', newIds) <- lift $ runStateT (everywhereM (mkM rewriteHsBindLR) binds) emptyDNameEnv
   forM_ newIds $ \(id', _) -> do
    lift $ outputTcM "Modified id: " id'
@@ -56,37 +69,76 @@ rewriteBinds binds = do
    return ()
   modify (plusUDFM newIds)
   gbl <- lift getGblEnv
-  let gbl' = gbl {tcg_binds = binds'}
-  gbl'' <- lift $ setGlobalTypeEnv gbl' (extendTypeEnvWithIds (tcg_type_env gbl') (fst <$> toList newIds))
-  lift $ outputTcM "new type env: " $ tcg_type_env gbl''
-  lift $ setGblEnv gbl'' $ rewriteCalls binds' newIds
+  --gbl'' <- if isEmptyDNameEnv newIds then return gbl' else do
+  --  lift $ outputTcM "updating type env with new ids: " $ varType . fst <$> toList newIds
+  --  gbl'' <- lift $ setGlobalTypeEnv gbl' (extendTypeEnvWithIds (tcg_type_env gbl') (fst <$> toList newIds))
+  --  forM_ newIds $ \(var, _) -> do
+  --    thing <- tcExtendGlobalEnv
+  --    lift $ outputTcM "new lookups: " $ varType . fst <$> toList newIds
+  --  return gbl''
+  ----lift $ outputTcM "new type env: " $ tcg_type_env gbl''
+  lift $ setGblEnv gbl{tcg_binds = binds'} $ tcExtendGlobalEnvImplicit (AnId . fst <$> toList newIds) $ do
+    binds'' <- rewriteCalls binds' newIds
+    forM_ newIds $ \(var, _) -> do
+      outputTcM "lookup' var: " $ var
+      outputTcM "lookup' unique: " $ varUnique var
+      res <- tcLookup (varName var)
+      case res of
+        AGlobal (AnId resId) -> do
+          outputTcM "lookup' type: " $ varType resId
+        _ -> return ()
+    return binds''
+
 
 rewriteCalls :: LHsBinds GhcTc -> NameData -> TcM (LHsBinds GhcTc)
 rewriteCalls binds ids
   | isEmptyDNameEnv ids = return binds
-  | otherwise = everywhereM (mkM (rewriteCallsInBind ids)) binds
+  | otherwise = do
+    binds' <- everywhereM (mkM (rewriteCallsInBind ids)) binds
+    fst <$> runStateT (rewriteBinds binds') ids
 
 type TcStateM s a = StateT s TcM a
 
 rewriteHsBindLR :: HsBindLR GhcTc GhcTc -> TcStateM NameData (HsBindLR GhcTc GhcTc)
 rewriteHsBindLR (XHsBindsLR ab@(AbsBinds {abs_exports=exports, abs_binds=inner_binds})) = do
+  prevIds <- get
+  put emptyDNameEnv
   inner_binds' <- everywhereM (mkM rewriteInnerHsBindLR) inner_binds
   exports' <- mapM rewriteABExport exports
+  newIds <- get
+  --lift $ outputTcM "newly added: " newIds
+  put (plusUDFM prevIds newIds)
   return $ XHsBindsLR ab{abs_binds=inner_binds',abs_exports=exports'}
 rewriteHsBindLR b = return b
+
+--rewriteABExport :: ABExport -> TcStateM NameData ABExport
+--rewriteABExport e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = do
+--  modified <- get
+--  case (lookupDNameEnv modified (varName mono), wrap) of
+--    (Nothing, _) -> return e
+--    (Just (newId, predTys), WpHole) -> do
+--      unless (varName mono == varName newId) $ fail "unexpected mono id"
+--      let new_mono = setVarType mono (varType newId)
+--      let new_poly = setVarType poly (varType newId)
+--      modify (\env -> extendDNameEnv env (varName new_poly) (new_poly, predTys))
+--      return e{abe_mono=new_mono,abe_poly=new_poly}
+--    (Just _, _) -> fail "modification occurred inside nontrivial ABE wrapper"
 
 rewriteABExport :: ABExport -> TcStateM NameData ABExport
 rewriteABExport e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = do
   modified <- get
-  case (lookupDNameEnv modified (varName mono), wrap) of
-    (Nothing, _) -> return e
-    (Just (newId, predTys), WpHole) -> do
-      unless (varName mono == varName newId) $ fail "unexpected mono id"
-      let new_mono = setVarType mono (varType newId)
-      let new_poly = setVarType poly (varType newId)
-      modify (\env -> extendDNameEnv env (varName new_poly) (new_poly, predTys))
-      return e{abe_mono=new_mono,abe_poly=new_poly}
-    (Just _, _) -> fail "modification occurred inside nontrivial ABE wrapper"
+  if isEmptyDNameEnv modified then return e else do
+    case lookupDNameEnv modified (varName mono) of
+      Nothing -> return e
+      Just (newMono, predTys) -> do
+        let newPoly = setVarType poly (varType newMono)
+        lift $ outputTcM "new_mono: " $ varType newMono
+        modify (\env -> delFromDNameEnv env (varName mono))
+        modify (\env -> extendDNameEnv env (varName poly) (newPoly, predTys))
+        lift $ outputTcM "new_poly: " $ varType newPoly
+        modified' <- get
+        lift $ outputTcM "new_poly (actual): " $ fst <$> lookupDNameEnv modified' (varName poly)
+        return e{abe_mono=newMono,abe_poly=newPoly}
 
 rewriteInnerHsBindLR :: HsBindLR GhcTc GhcTc -> TcStateM NameData (HsBindLR GhcTc GhcTc)
 rewriteInnerHsBindLR b@(FunBind {fun_id=(L loc fid), fun_ext=wrapper }) = do
@@ -140,9 +192,14 @@ updateFunType ty wrapper_vars predTys = do
     tyVarFor var = fromMaybe var (lookup var var_pairs)
 
 rewriteCallsInBind :: NameData -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
-rewriteCallsInBind ids b@(FunBind {fun_id=(L _ _), fun_ext=wrapper }) = do
+rewriteCallsInBind ids b@(FunBind {}) = do
   outputTcM "Rewriting calls in bind: " b
   (b', wanteds) <- captureConstraints $ everywhereM (mkM (rewriteCall ids)) b
+  if isEmptyWC wanteds then return b' else rewriteEvAfterCalls wanteds b'
+rewriteCallsInBind _ b = return b
+
+rewriteEvAfterCalls :: WantedConstraints -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
+rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=wrapper}) = do
   outputTcM "Captured constraints: " wanteds
   (wc, ebm) <- runTcS $ solveWanteds wanteds
   outputTcM "Resulting wc: " wc
@@ -154,10 +211,8 @@ rewriteCallsInBind ids b@(FunBind {fun_id=(L _ _), fun_ext=wrapper }) = do
     0 -> return $ wrapper' <.> WpLet (EvBinds newEvBinds)
     1 -> return wrapper'
     _ -> fail "too many WpLet"
-  case b' of
-    fb@(FunBind {}) -> return fb{fun_ext=wrapper''}
-    _ -> fail "impossible"
-rewriteCallsInBind _ b = return b
+  return b{fun_ext=wrapper''}
+rewriteEvAfterCalls _ _ = fail "invalid arg"
 
 rewriteCall :: NameData -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
 rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w (HsVar x (L l var)))))

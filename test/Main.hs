@@ -1,33 +1,18 @@
-{-# OPTIONS_GHC -fplugin=TestPlugin.Plugin #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Main (main) where
+module Main (main, f) where
 
 import Data.Proxy
-import TestPlugin
-
-class MyTotalClass (a :: Bool) where
-  isTrue :: Proxy a -> Bool
-
-instance TotalClass MyTotalClass where
-  totalityEvidence = assertTotality
---
-f :: forall (a :: Bool). Proxy a -> Bool
-f x = isTrue x
-
-f' :: forall (a :: Bool). (MyTotalClass a, Show String) => Bool -> Proxy a -> Bool
-f' True x = isTrue x
-f' False x = isTrue x && isTrue x
-
+import TestModule
 
 main :: IO ()
 main = do
-  --putStrLn $ show $ f True (Proxy :: Proxy True)
+  print $ f (Proxy :: Proxy True)
+  print $ vlength $ VCons "hello" $ VCons "world" VNil
   putStrLn "Test suite not yet implemented."
 
 -- f1 :: a -> m a

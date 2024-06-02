@@ -5,18 +5,18 @@ module TestPlugin.Rewriter (totalTcResultAction) where
 import Data.Foldable (forM_, Foldable (toList))
 
 import GHC.Plugins hiding (TcPlugin)
-import GHC.Tc.Types (TcM, TcGblEnv (..), TcTyThing (AGlobal))
+import GHC.Tc.Types (TcM, TcGblEnv (..), TcTyThing (AGlobal), TcRef)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr), EvBindMap, evBindMapBinds)
 import GHC (LHsBindLR, GhcTc, HsBindLR (..), AbsBinds (..), HsExpr (..), XXExprGhcTc (..), HsWrap (..), LHsBinds, Ghc, ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), Docs (docs_args))
 import Data.Generics (everywhereM, mkM, mkT, everywhere)
 import Control.Monad.State (StateT (runStateT), MonadTrans (lift), get, modify, when, unless, put, State, runState)
 import GHC.Data.Bag (filterBagM, unionBags, Bag)
 import TestPlugin.Placeholder (isPlaceholder)
-import GHC.Tc.Utils.TcType (mkPhiTy)
-import GHC.Core.TyCo.Rep (Type(TyVarTy, TyConApp, CoercionTy, CastTy), TyCoBinder (Named, Anon), Scaled (Scaled))
+import GHC.Tc.Utils.TcType (mkPhiTy, TcThetaType)
+import GHC.Core.TyCo.Rep (Type(TyVarTy, TyConApp, CoercionTy, CastTy, FunTy), TyCoBinder (Named, Anon), Scaled (Scaled))
 import GHC.Hs.Syn.Type (hsExprType)
 import Data.Maybe (mapMaybe, fromMaybe, isJust)
-import GHC.Tc.Utils.Monad (captureConstraints, setGblEnv, getGblEnv)
+import GHC.Tc.Utils.Monad (captureConstraints, newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef)
 import GHC.Tc.Utils.Env (tcLookup, setGlobalTypeEnv, tcExtendGlobalEnv, tcExtendGlobalEnvImplicit)
 import GHC.Types.TypeEnv (extendTypeEnv, extendTypeEnvWithIds)
 import GHC.Types.Unique.DFM (plusUDFM)
@@ -26,7 +26,9 @@ import GHC.Tc.Solver (solveWanteds)
 import GHC.Tc.Solver.Monad (runTcS)
 import GHC.Tc.Types.Constraint (isSolvedWC, WantedConstraints, isEmptyWC)
 
-type NameData = DNameEnv (Id, [PredType])
+data UpdateInfo = UInfo { old_type :: Type, new_id :: Id, new_theta :: TcThetaType }
+
+type UpdateEnv = DNameEnv UpdateInfo
 
 totalTcResultAction :: [CommandLineOption] -> ModSummary -> TcGblEnv -> TcM TcGblEnv
 totalTcResultAction _ _ gbl = do
@@ -52,36 +54,26 @@ totalTcResultAction _ _ gbl = do
     --    _ -> return ()
     getGblEnv
 
-rewriteIdTypes :: NameData -> Id -> Id
-rewriteIdTypes ids id'
-  | Just (id'', _) <- lookupDNameEnv ids (varName id') = id''
-  | otherwise = id'
-
 rewriteBinds :: TcGblEnv -> TcM TcGblEnv
 rewriteBinds gbl = do
   let binds = tcg_binds gbl
-  (binds', newIds) <- runStateT (everywhereM (mkM rewriteHsBindLR) binds) emptyDNameEnv
-  forM_ newIds $ \(id', _) -> do
+  updateEnv <- newTcRef emptyDNameEnv
+  binds' <- everywhereM (mkM (rewriteHsBindLR updateEnv)) binds
+  updates <- readTcRef updateEnv
+  forM_ updates $ \UInfo{new_id=id', old_type=oldTy, new_theta=newTheta} -> do
    outputTcM "Modified id: " id'
-   outputTcM "Modified id type: " $ varType id'
-   outputTcM "Modified id unique: " $ varUnique id'
+   outputTcM "New type: " $ varType id'
+   printBndrTys $ varType id'
+   outputTcM "Old type: " oldTy
+   printBndrTys oldTy
+   outputTcM "New theta: " newTheta
    return ()
-  setGblEnv gbl{tcg_binds = binds'} $ tcExtendGlobalEnvImplicit (AnId . fst <$> toList newIds) $ do
+  setGblEnv gbl{tcg_binds = binds'} $ tcExtendGlobalEnvImplicit ((\UInfo{new_id=id'} -> AnId id') <$> toList updates) $ do
     gbl' <- getGblEnv
-    gbl'' <- rewriteCalls newIds gbl'
-    setGblEnv gbl'' $ do
-      forM_ newIds $ \(var, _) -> do
-        outputTcM "lookup' var: " $ var
-        outputTcM "lookup' unique: " $ varUnique var
-        res <- tcLookup (varName var)
-        case res of
-          AGlobal (AnId resId) -> do
-            outputTcM "lookup' type: " $ varType resId
-          _ -> return ()
-      getGblEnv
+    rewriteCalls updates gbl'
 
 
-rewriteCalls :: NameData -> TcGblEnv -> TcM TcGblEnv
+rewriteCalls :: UpdateEnv -> TcGblEnv -> TcM TcGblEnv
 rewriteCalls ids gbl
   | isEmptyDNameEnv ids = return gbl
   | otherwise = do
@@ -90,21 +82,18 @@ rewriteCalls ids gbl
       gbl' <- getGblEnv
       rewriteBinds gbl'
 
-type TcStateM s a = StateT s TcM a
-
-rewriteHsBindLR :: HsBindLR GhcTc GhcTc -> TcStateM NameData (HsBindLR GhcTc GhcTc)
-rewriteHsBindLR (XHsBindsLR ab@(AbsBinds {abs_exports=exports, abs_binds=inner_binds})) = do
-  prevIds <- get
-  put emptyDNameEnv
-  inner_binds' <- everywhereM (mkM rewriteInnerHsBindLR) inner_binds
-  exports' <- mapM rewriteABExport exports
-  newIds <- get
+rewriteHsBindLR :: TcRef UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
+rewriteHsBindLR updateEnv (XHsBindsLR ab@(AbsBinds {abs_exports=exports, abs_binds=inner_binds})) = do
+  newUpdateEnv <- newTcRef emptyDNameEnv
+  inner_binds' <- everywhereM (mkM (rewriteInnerHsBindLR newUpdateEnv)) inner_binds
+  exports' <- mapM (rewriteABExport newUpdateEnv) exports
+  newUpdates <- readTcRef newUpdateEnv
   --lift $ outputTcM "newly added: " newIds
-  put (plusUDFM prevIds newIds)
+  updTcRef updateEnv (plusUDFM newUpdates)
   return $ XHsBindsLR ab{abs_binds=inner_binds',abs_exports=exports'}
-rewriteHsBindLR b = return b
+rewriteHsBindLR _ b = return b
 
---rewriteABExport :: ABExport -> TcStateM NameData ABExport
+--rewriteABExport :: ABExport -> TcStateM UpdateEnv ABExport
 --rewriteABExport e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = do
 --  modified <- get
 --  case (lookupDNameEnv modified (varName mono), wrap) of
@@ -117,40 +106,42 @@ rewriteHsBindLR b = return b
 --      return e{abe_mono=new_mono,abe_poly=new_poly}
 --    (Just _, _) -> fail "modification occurred inside nontrivial ABE wrapper"
 
-rewriteABExport :: ABExport -> TcStateM NameData ABExport
-rewriteABExport e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = do
-  modified <- get
-  if isEmptyDNameEnv modified then return e else do
-    case lookupDNameEnv modified (varName mono) of
+rewriteABExport :: TcRef UpdateEnv -> ABExport -> TcM ABExport
+rewriteABExport updateEnv e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = do
+  updates <- readTcRef updateEnv
+  if isEmptyDNameEnv updates then return e else do
+    case lookupDNameEnv updates (varName mono) of
       Nothing -> return e
-      Just (newMono, predTys) -> do
+      Just u -> do
+        let newMono = new_id u
         let newPoly = setVarType poly (varType newMono)
         --lift $ outputTcM "new_mono: " $ varType newMono
-        modify (\env -> delFromDNameEnv env (varName mono))
-        modify (\env -> extendDNameEnv env (varName poly) (newPoly, predTys))
+        updTcRef updateEnv (\env -> delFromDNameEnv env (varName mono))
+        updTcRef updateEnv (\env -> extendDNameEnv env (varName poly) u{new_id=newPoly})
         --lift $ outputTcM "new_poly: " $ varType newPoly
         --lift $ outputTcM "new_poly invispitys: " $ splitInvisPiTys $ varType newPoly
         --modified' <- get
         --lift $ outputTcM "new_poly (actual): " $ fst <$> lookupDNameEnv modified' (varName poly)
         return e{abe_mono=newMono,abe_poly=newPoly}
 
-rewriteInnerHsBindLR :: HsBindLR GhcTc GhcTc -> TcStateM NameData (HsBindLR GhcTc GhcTc)
-rewriteInnerHsBindLR b@(FunBind {fun_id=(L loc fid), fun_ext=wrapper }) = do
-  result <- lift $ rewriteHsWrapper wrapper
+rewriteInnerHsBindLR :: TcRef UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
+rewriteInnerHsBindLR updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=wrapper }) = do
+  result <- rewriteHsWrapper wrapper
   case result of
     Nothing -> return b
     Just (wrapper', newArgTys) -> do
-      newTy <- lift $ updateFunType (varType fid) (wrapperBinders wrapper) newArgTys
-      lift $ outputTcM "new ty: " $ newTy
+      let oldTy = varType fid
+      newTy <- updateFunType oldTy (wrapperBinders wrapper) newArgTys
+      outputTcM "new ty: " newTy
       case splitInvisPiTys newTy of
         ([Named (Bndr var _), Anon _ (Scaled _ (TyConApp _ [TyVarTy var']))], _) -> do
-          lift $ outputTcM "var in ty binder: " $ varUnique var
-          lift $ outputTcM "var in inst binder: " $ varUnique var'
+          outputTcM "var in ty binder: " $ varUnique var
+          outputTcM "var in inst binder: " $ varUnique var'
         _ -> return ()
       let fid' = setVarType fid newTy
-      modify (\env -> extendDNameEnv env (varName fid') (fid', newArgTys))
+      updTcRef updateEnv (\env -> extendDNameEnv env (varName fid') UInfo{new_id=fid',old_type=oldTy,new_theta=newArgTys})
       return b {fun_id=L loc fid', fun_ext=wrapper'}
-rewriteInnerHsBindLR b = return b
+rewriteInnerHsBindLR _ b = return b
 
 wrapperBinders :: HsWrapper -> [Var]
 wrapperBinders (WpCompose w1 w2) = wrapperBinders w1 ++ wrapperBinders w2
@@ -159,20 +150,22 @@ wrapperBinders _ = []
 
 rewriteHsWrapper :: HsWrapper -> TcM (Maybe (HsWrapper, [PredType]))
 rewriteHsWrapper wrapper = do
-  (wrapper', tys) <- runStateT (everywhereM (mkM rewriteWpLet) wrapper) [] 
+  newArgsRef <- newTcRef []
+  wrapper' <- everywhereM (mkM (rewriteWpLet newArgsRef)) wrapper
+  tys <- readTcRef newArgsRef
   case tys of
     [] -> return Nothing
     [[]] -> return Nothing
     [newArgTys] -> return $ Just (wrapper', newArgTys) 
     _ -> fail "encountered multiple WpLet, this should not happen"
 
-rewriteWpLet :: HsWrapper -> TcStateM [[PredType]] HsWrapper
-rewriteWpLet (WpLet (TcEvBinds _)) = fail "Encountered unzonked TcEvBinds, this should not happen"
-rewriteWpLet (WpLet (EvBinds binds)) = do
+rewriteWpLet :: TcRef [[PredType]] -> HsWrapper -> TcM HsWrapper
+rewriteWpLet _ (WpLet (TcEvBinds _)) = fail "Encountered unzonked TcEvBinds, this should not happen"
+rewriteWpLet newArgsRef (WpLet (EvBinds binds)) = do
   let (binds', evVars) = runState (filterBagM isNotPlaceholder binds) []
-  modify ((varType <$> evVars) :)
+  updTcRef newArgsRef ((varType <$> evVars) :)
   return $ foldr ((<.>) . WpEvLam) (WpLet (EvBinds binds')) evVars
-rewriteWpLet w = return w
+rewriteWpLet _ w = return w
 
 isNotPlaceholder :: EvBind -> State [EvVar] Bool
 isNotPlaceholder (EvBind {eb_lhs=evVar, eb_rhs=evTerm})
@@ -191,7 +184,7 @@ updateFunType ty wrapper_vars predTys = do
     var_pairs = zip wrapper_vars ty_vars
     tyVarFor var = fromMaybe var (lookup var var_pairs)
 
-rewriteCallsInBind :: NameData -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
+rewriteCallsInBind :: UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
 rewriteCallsInBind ids b@(FunBind {}) = do
   outputTcM "Rewriting calls in bind: " b
   (b', wanteds) <- captureConstraints $ everywhereM (mkM (rewriteCall ids)) b
@@ -206,7 +199,9 @@ rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=wrapper}) = do
   outputTcM "Resulting ebm: " ebm
   outputTcM "solved: " $ isSolvedWC wc
   let newEvBinds = evBindMapBinds ebm
-  (wrapper', changes) <- runStateT (everywhereM (mkM (addBindsToWpLet newEvBinds)) wrapper) 0
+  counter <- newTcRef 0
+  wrapper' <- everywhereM (mkM (addBindsToWpLet counter newEvBinds)) wrapper
+  changes <- readTcRef counter
   wrapper'' <- case changes of
     0 -> return $ wrapper' <.> WpLet (EvBinds newEvBinds)
     1 -> return wrapper'
@@ -214,18 +209,19 @@ rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=wrapper}) = do
   return b{fun_ext=wrapper''}
 rewriteEvAfterCalls _ _ = fail "invalid arg"
 
-rewriteCall :: NameData -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
+rewriteCall :: UpdateEnv -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
 rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w (HsVar x (L l var)))))
-  | Just (newId, predTys) <- lookupDNameEnv ids (varName var) = do
+  | Just UInfo{new_id=newId, new_theta=predTys} <- lookupDNameEnv ids (varName var) = do
     outputTcM "Found wrapped call: " expr
     outputTcM "wrapper: " ()
     printWrapper 1 w
     outputTcM "type: " $ hsExprType expr
-
-    res <- tcLookup (varName var)
-    case res of
-      AGlobal (AnId resId) -> outputTcM "lookup: " $ varType resId
+    case hsExprType expr of
+      FunTy _ _ (TyConApp _ [_, TyVarTy tyVar]) _ -> outputTcM "Ty var in arg: " $ varUnique tyVar
       _ -> return ()
+    outputTcM "inner type: " $ varType var
+    printBndrTys $ varType var
+    
     w' <- instCallConstraints (OccurrenceOf (varName var)) predTys
     let newWrap = w' <.> w
     outputTcM "New wrapper: " () 
@@ -236,19 +232,22 @@ rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w (HsVar x (L l var)))))
   | otherwise = return expr
 rewriteCall _ expr = return expr
 
-addBindsToWpLet :: Bag EvBind -> HsWrapper -> TcStateM Int HsWrapper
-addBindsToWpLet _ (WpLet (TcEvBinds _)) = fail "Encountered unzonked TcEvBinds, this should not happen"
-addBindsToWpLet binds (WpLet (EvBinds binds')) = do
+addBindsToWpLet :: TcRef Int -> Bag EvBind -> HsWrapper -> TcM HsWrapper
+addBindsToWpLet _ _ (WpLet (TcEvBinds _)) = fail "Encountered unzonked TcEvBinds, this should not happen"
+addBindsToWpLet counter binds (WpLet (EvBinds binds')) = do
   let newBinds = unionBags binds binds'
-  modify (+1)
+  updTcRef counter (+1)
   return (WpLet (EvBinds newBinds))
-addBindsToWpLet _ w = return w
+addBindsToWpLet _ _ w = return w
 
 printBndrTys :: Type -> TcM ()
 printBndrTys ty = do
   let (bndrs, ty') = splitInvisPiTys ty
   outputTcM "bndrs: " bndrs
   outputTcM "ty without bndrs: " ty'
+  case ty' of
+    FunTy _ _ (TyConApp _ [_, TyVarTy tyVar]) _ -> outputTcM "Ty var in arg: " $ varUnique tyVar
+    _ -> return ()
   forM_ bndrs $ \case
     Named (Bndr var _) -> outputTcM "ty var in bndr: " $ varUnique var
     --Anon _ arg -> outputTcM "anon bndr: " arg

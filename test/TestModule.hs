@@ -27,6 +27,12 @@ instance TotalClass MyTotalClass where
 f :: forall (a :: Bool). Proxy a -> Bool
 f x = isTrue x
 
+f' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
+f' x = isTrue x
+
+fMono ::  Bool
+fMono = isTrue (Proxy :: Proxy True)
+
 showF :: forall (a :: Bool). Proxy a -> String
 showF x = show $ f x
 

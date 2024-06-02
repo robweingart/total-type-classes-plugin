@@ -7,7 +7,7 @@ import Data.Foldable (forM_, Foldable (toList))
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcTyThing (AGlobal))
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr), EvBindMap, evBindMapBinds)
-import GHC (LHsBindLR, GhcTc, HsBindLR (..), AbsBinds (..), HsExpr (..), XXExprGhcTc (..), HsWrap (..), LHsBinds, Ghc, ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId))
+import GHC (LHsBindLR, GhcTc, HsBindLR (..), AbsBinds (..), HsExpr (..), XXExprGhcTc (..), HsWrap (..), LHsBinds, Ghc, ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), Docs (docs_args))
 import Data.Generics (everywhereM, mkM, mkT, everywhere)
 import Control.Monad.State (StateT (runStateT), MonadTrans (lift), get, modify, when, unless, put, State, runState)
 import GHC.Data.Bag (filterBagM, unionBags, Bag)
@@ -35,13 +35,13 @@ totalTcResultAction _ _ gbl = do
   gbl' <- rewriteBinds gbl
   setGblEnv gbl' $ do
     typeEnv <- tcg_type_env <$> getGblEnv
-    outputTcM "Final type env: " $ typeEnv
-    forM_ (nonDetNameEnvElts typeEnv) $ \case
-      AnId resId -> do
-        outputTcM "env var: " $ resId
-        outputTcM "env unique: " $ varUnique resId
-        outputTcM "env type: " $ varType resId
-      _ -> return ()
+    --outputTcM "Final type env: " $ typeEnv
+    -- forM_ (nonDetNameEnvElts typeEnv) $ \case
+    --   AnId resId -> do
+    --     outputTcM "env var: " $ resId
+    --     outputTcM "env unique: " $ varUnique resId
+    --     outputTcM "env type: " $ varType resId
+    --   _ -> return ()
     --forM_ allIds $ \(var, _) -> do
     --  outputTcM "lookup var: " $ var
     --  outputTcM "lookup unique: " $ varUnique var
@@ -125,12 +125,13 @@ rewriteABExport e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = do
       Nothing -> return e
       Just (newMono, predTys) -> do
         let newPoly = setVarType poly (varType newMono)
-        lift $ outputTcM "new_mono: " $ varType newMono
+        --lift $ outputTcM "new_mono: " $ varType newMono
         modify (\env -> delFromDNameEnv env (varName mono))
         modify (\env -> extendDNameEnv env (varName poly) (newPoly, predTys))
-        lift $ outputTcM "new_poly: " $ varType newPoly
-        modified' <- get
-        lift $ outputTcM "new_poly (actual): " $ fst <$> lookupDNameEnv modified' (varName poly)
+        --lift $ outputTcM "new_poly: " $ varType newPoly
+        --lift $ outputTcM "new_poly invispitys: " $ splitInvisPiTys $ varType newPoly
+        --modified' <- get
+        --lift $ outputTcM "new_poly (actual): " $ fst <$> lookupDNameEnv modified' (varName poly)
         return e{abe_mono=newMono,abe_poly=newPoly}
 
 rewriteInnerHsBindLR :: HsBindLR GhcTc GhcTc -> TcStateM NameData (HsBindLR GhcTc GhcTc)
@@ -140,6 +141,12 @@ rewriteInnerHsBindLR b@(FunBind {fun_id=(L loc fid), fun_ext=wrapper }) = do
     Nothing -> return b
     Just (wrapper', newArgTys) -> do
       newTy <- lift $ updateFunType (varType fid) (wrapperBinders wrapper) newArgTys
+      lift $ outputTcM "new ty: " $ newTy
+      case splitInvisPiTys newTy of
+        ([Named (Bndr var _), Anon _ (Scaled _ (TyConApp _ [TyVarTy var']))], _) -> do
+          lift $ outputTcM "var in ty binder: " $ varUnique var
+          lift $ outputTcM "var in inst binder: " $ varUnique var'
+        _ -> return ()
       let fid' = setVarType fid newTy
       modify (\env -> extendDNameEnv env (varName fid') (fid', newArgTys))
       return b {fun_id=L loc fid', fun_ext=wrapper'}
@@ -211,6 +218,10 @@ rewriteCall :: NameData -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
 rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w (HsVar x (L l var)))))
   | Just (newId, predTys) <- lookupDNameEnv ids (varName var) = do
     outputTcM "Found wrapped call: " expr
+    outputTcM "wrapper: " ()
+    printWrapper 1 w
+    outputTcM "type: " $ hsExprType expr
+
     res <- tcLookup (varName var)
     case res of
       AGlobal (AnId resId) -> outputTcM "lookup: " $ varType resId

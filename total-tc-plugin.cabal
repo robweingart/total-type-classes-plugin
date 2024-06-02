@@ -68,7 +68,7 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.17.0.0, ghc, syb, mtl, bytestring
+    build-depends:    base, ghc, syb, mtl, bytestring
 
 
     -- Directories containing source files.
@@ -101,5 +101,5 @@ test-suite total-tc-plugin-test
 
     -- Test dependencies.
     build-depends:
-        base ^>=4.17.0.0,
+        base,
         total-tc-plugin

@@ -35,6 +35,9 @@ rewriteBinds gbl cont = do
    outputTcM "Old type: " oldTy
    printBndrTys oldTy
    outputTcM "New theta: " newTheta
+   forM_ newTheta $ \case
+     TyConApp _ [TyVarTy var] -> outputTcM "  type var in theta: " $ varUnique var
+     _ -> return ()
    return ()
   setGblEnv gbl{tcg_binds = binds'} $ tcExtendGlobalEnvImplicit ((\UInfo{new_id=id'} -> AnId id') <$> toList updates) $ do
     gbl' <- getGblEnv
@@ -76,7 +79,7 @@ rewriteInnerHsBindLR updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper,
     Nothing -> return b
     Just (wrapper', newArgTys) -> do
       let oldTy = varType fid
-      newTy <- updateFunType oldTy (wrapperBinders wrapper) newArgTys
+      (newTy, newArgTys') <- updateFunType oldTy (wrapperBinders wrapper) newArgTys
       outputTcM "new ty: " newTy
       case splitInvisPiTys newTy of
         ([Named (Bndr var _), Anon (Scaled _ (TyConApp _ [TyVarTy var'])) _], _) -> do
@@ -84,7 +87,7 @@ rewriteInnerHsBindLR updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper,
           outputTcM "var in inst binder: " $ varUnique var'
         _ -> return ()
       let fid' = setVarType fid newTy
-      updTcRef updateEnv (\env -> extendDNameEnv env (varName fid') UInfo{new_id=fid',old_type=oldTy,new_theta=newArgTys})
+      updTcRef updateEnv (\env -> extendDNameEnv env (varName fid') UInfo{new_id=fid',old_type=oldTy,new_theta=newArgTys'})
       return b {fun_id=L loc fid', fun_ext=(wrapper', ctick)}
 rewriteInnerHsBindLR _ b = return b
 
@@ -119,10 +122,10 @@ isNotPlaceholder (EvBind {eb_lhs=evVar, eb_rhs=evTerm})
     return False
   | otherwise = return True
 
-updateFunType :: Type -> [Var] -> [PredType] -> TcM Type
+updateFunType :: Type -> [Var] -> [PredType] -> TcM (Type, [PredType])
 updateFunType ty wrapper_vars predTys = do
   let predTys' = everywhere (mkT tyVarFor) predTys 
-  return $ mkPiTys bndrs $ mkPhiTy predTys' ty'
+  return $ (mkPiTys bndrs $ mkPhiTy predTys' ty', predTys')
   where
     (bndrs, ty') = splitInvisPiTys ty
     ty_vars = mapMaybe (\case { Named (Bndr var _) -> Just var; _ -> Nothing }) bndrs

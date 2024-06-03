@@ -3,7 +3,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Main (main, f, showF) where
+module Main (main) where
 
 import Data.Proxy
 import TestModule
@@ -11,7 +11,9 @@ import TestModule
 main :: IO ()
 main = do
   print $ f (Proxy :: Proxy True)
+  print $ fMono
   print $ showF (Proxy :: Proxy True)
+  print $ showFMono
   print $ vlength $ VCons "hello" $ VCons "world" VNil
   putStrLn "Test suite not yet implemented."
 

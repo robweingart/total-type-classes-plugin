@@ -7,7 +7,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-module TestModule ( f, showF, Vec(..), vlength ) where
+module TestModule ( f, showF, fMono, showFMono, Vec(..), vlength ) where
 
 import Data.Proxy
 import TestPlugin
@@ -35,6 +35,9 @@ fMono = isTrue (Proxy :: Proxy True)
 
 showF :: forall (a :: Bool). Proxy a -> String
 showF x = show $ f x
+
+showFMono :: String
+showFMono = show $ f (Proxy :: Proxy True)
 
 
 data MyNat = Z | S MyNat deriving Show

@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module TestPlugin.Rewriter.Call (rewriteCalls) where
 
 import GHC.Plugins hiding (TcPlugin)
@@ -17,6 +19,8 @@ import GHC.Tc.Types.Constraint (isSolvedWC, WantedConstraints, isEmptyWC)
 
 import TestPlugin.Rewriter.Env
 import TestPlugin.Rewriter.Utils
+import GHC.Core.TyCo.Compare (eqType)
+import Control.Monad (unless, forM_)
 
 
 rewriteCalls :: UpdateEnv -> TcGblEnv -> (TcGblEnv -> TcM TcGblEnv) -> TcM TcGblEnv
@@ -55,7 +59,7 @@ rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=(wrapper, ctick)}) = do
 rewriteEvAfterCalls _ _ = fail "invalid arg"
 
 rewriteCall :: UpdateEnv -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
-rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w e@(HsVar x (L l var)))))
+rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w inner_expr@(HsVar x (L l var)))))
   | Just UInfo{new_id=newId, new_theta=predTys} <- lookupDNameEnv ids (varName var) = do
     outputTcM "Found wrapped call: " expr
     outputTcM "wrapper: " ()
@@ -66,12 +70,28 @@ rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w e@(HsVar x (L l var)))))
       _ -> return ()
     outputTcM "inner type: " $ varType var
     printBndrTys $ varType var
-    
-    w' <- instCallConstraints (OccurrenceOf (varName var)) predTys
+
+    let inner_ty = hsExprType inner_expr
+    let outer_ty = hsExprType expr
+    let (wrapped_ty, subst) = hsWrapperTypeSubst w inner_ty
+    outputTcM "Computed outer type: " wrapped_ty
+    unless (eqType outer_ty wrapped_ty) $ fail "hsWrapperTypeSubst type mismatch"
+    outputTcM "Subst: " subst
+    let (Subst _ _ tvSubstEnv _) = subst
+    nonDetFoldUFM  (\case { TyVarTy var -> (>>) $ outputTcM "ty var in subst env: " $ varUnique var; _ -> id }) (return ()) tvSubstEnv
+    let theta = substTheta subst predTys
+    outputTcM "Constraints to add: " $ theta
+    w' <- instCallConstraints (OccurrenceOf (varName var)) theta
     let newWrap = w' <.> w
     outputTcM "New wrapper: " () 
     printWrapper 1 newWrap
+    let (new_wrapped_ty, _) = hsWrapperTypeSubst w inner_ty
+    outputTcM "New computed outer type: " new_wrapped_ty
+    unless (eqType outer_ty new_wrapped_ty) $ fail "adding theta changed type"
     let newExpr = XExpr (WrapExpr (HsWrap newWrap (HsVar x (L l newId))))
+    let (wrapped2, subst2) = hsWrapperTypeSubst newWrap $ varType newId
+    outputTcM "New computed outer type 2: " $ wrapped2
+    outputTcM "New subst: " $ subst2
     outputTcM "New call: " newExpr 
     return newExpr
   | otherwise = return expr

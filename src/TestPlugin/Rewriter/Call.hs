@@ -37,7 +37,7 @@ rewriteCallsInBind ids b@(FunBind {}) = do
 rewriteCallsInBind _ b = return b
 
 rewriteEvAfterCalls :: WantedConstraints -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
-rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=wrapper}) = do
+rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=(wrapper, ctick)}) = do
   outputTcM "Captured constraints: " wanteds
   (wc, ebm) <- runTcS $ solveWanteds wanteds
   outputTcM "Resulting wc: " wc
@@ -51,11 +51,11 @@ rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=wrapper}) = do
     0 -> return $ wrapper' <.> WpLet (EvBinds newEvBinds)
     1 -> return wrapper'
     _ -> fail "too many WpLet"
-  return b{fun_ext=wrapper''}
+  return b{fun_ext=(wrapper'', ctick)}
 rewriteEvAfterCalls _ _ = fail "invalid arg"
 
 rewriteCall :: UpdateEnv -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
-rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w (HsVar x (L l var)))))
+rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w e@(HsVar x (L l var)))))
   | Just UInfo{new_id=newId, new_theta=predTys} <- lookupDNameEnv ids (varName var) = do
     outputTcM "Found wrapped call: " expr
     outputTcM "wrapper: " ()

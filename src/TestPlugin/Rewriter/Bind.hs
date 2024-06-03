@@ -5,19 +5,19 @@ module TestPlugin.Rewriter.Bind (rewriteBinds) where
 import Data.Foldable (forM_, Foldable (toList))
 
 import GHC.Plugins hiding (TcPlugin)
-import GHC.Tc.Types (TcM, TcGblEnv (..), TcTyThing (AGlobal), TcRef)
-import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr), EvBindMap, evBindMapBinds)
-import GHC (LHsBindLR, GhcTc, HsBindLR (..), AbsBinds (..), HsExpr (..), XXExprGhcTc (..), HsWrap (..), LHsBinds, Ghc, ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), Docs (docs_args))
+import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef)
+import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds))
+import GHC (GhcTc, HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId))
 import Data.Generics (everywhereM, mkM, mkT, everywhere)
 import Control.Monad.State (modify, State, runState)
 import GHC.Data.Bag (filterBagM)
 import TestPlugin.Placeholder (isPlaceholder)
-import GHC.Tc.Utils.TcType (mkPhiTy, TcThetaType)
-import Data.Maybe (mapMaybe, fromMaybe, isJust)
+import GHC.Tc.Utils.TcType (mkPhiTy)
+import Data.Maybe (mapMaybe, fromMaybe)
 import GHC.Tc.Utils.Monad (newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef)
 import GHC.Tc.Utils.Env (tcExtendGlobalEnvImplicit)
 import GHC.Types.Unique.DFM (plusUDFM)
-import GHC.Core.TyCo.Rep (TyCoBinder(..), Scaled (..), Type (..))
+import GHC.Core.TyCo.Rep (Scaled (..), Type (..))
 
 import TestPlugin.Rewriter.Env
 import TestPlugin.Rewriter.Utils
@@ -70,7 +70,7 @@ rewriteABExport updateEnv e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = d
         return e{abe_mono=newMono,abe_poly=newPoly}
 
 rewriteInnerHsBindLR :: TcRef UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
-rewriteInnerHsBindLR updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=wrapper }) = do
+rewriteInnerHsBindLR updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick) }) = do
   result <- rewriteHsWrapper wrapper
   case result of
     Nothing -> return b
@@ -79,13 +79,13 @@ rewriteInnerHsBindLR updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=wrapper }
       newTy <- updateFunType oldTy (wrapperBinders wrapper) newArgTys
       outputTcM "new ty: " newTy
       case splitInvisPiTys newTy of
-        ([Named (Bndr var _), Anon _ (Scaled _ (TyConApp _ [TyVarTy var']))], _) -> do
+        ([Named (Bndr var _), Anon (Scaled _ (TyConApp _ [TyVarTy var'])) _], _) -> do
           outputTcM "var in ty binder: " $ varUnique var
           outputTcM "var in inst binder: " $ varUnique var'
         _ -> return ()
       let fid' = setVarType fid newTy
       updTcRef updateEnv (\env -> extendDNameEnv env (varName fid') UInfo{new_id=fid',old_type=oldTy,new_theta=newArgTys})
-      return b {fun_id=L loc fid', fun_ext=wrapper'}
+      return b {fun_id=L loc fid', fun_ext=(wrapper', ctick)}
 rewriteInnerHsBindLR _ b = return b
 
 wrapperBinders :: HsWrapper -> [Var]

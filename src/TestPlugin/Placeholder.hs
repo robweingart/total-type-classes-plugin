@@ -17,7 +17,7 @@ placeholderBS = case mkLitString placeholderString of
 mkPlaceholder :: PredType -> EvTerm
 mkPlaceholder predType = if isPlaceholder expr then expr else error "isPlaceholder (mkPlaceholder _) is false, bug"
   where
-    expr = EvExpr $ mkRuntimeErrorApp rUNTIME_ERROR_ID predType placeholderString
+    expr = EvExpr $ mkImpossibleExpr predType placeholderString
 
 isPlaceholder :: EvTerm -> Bool
 isPlaceholder = isJust . getPlaceholderPredType

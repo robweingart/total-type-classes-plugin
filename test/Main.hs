@@ -10,11 +10,13 @@ import TestModule
 
 main :: IO ()
 main = do
-  print $ f (Proxy :: Proxy True)
-  print $ fMono
-  print $ showF (Proxy :: Proxy True)
-  print $ showFMono
-  print $ vlength $ VCons "hello" $ VCons "world" VNil
+  --print $ f (Proxy :: Proxy True)
+  --print $ fMono
+  --print $ showF (Proxy :: Proxy True)
+  --print $ showF2 (Proxy :: Proxy True)
+  print $ showFAnd (Proxy :: Proxy True)
+  --print $ showFMono
+  --print $ vlength $ VCons "hello" $ VCons "world" VNil
   putStrLn "Test suite not yet implemented."
 
 -- f1 :: a -> m a

@@ -6,7 +6,7 @@ import GHC.Plugins hiding (TcPlugin)
 import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap))
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds)
-import Data.Generics (everywhereM, mkM)
+import Data.Generics (everywhereM, mkM, everywhereBut, mkQ)
 import GHC.Data.Bag (unionBags, Bag)
 import GHC.Core.TyCo.Rep (Type(..))
 import GHC.Hs.Syn.Type (hsExprType)
@@ -20,7 +20,7 @@ import GHC.Tc.Types.Constraint (isSolvedWC, WantedConstraints, isEmptyWC)
 import TestPlugin.Rewriter.Env
 import TestPlugin.Rewriter.Utils
 import GHC.Core.TyCo.Compare (eqType)
-import Control.Monad (unless, forM_)
+import Control.Monad (unless)
 
 
 rewriteCalls :: UpdateEnv -> TcGblEnv -> (TcGblEnv -> TcM TcGblEnv) -> TcM TcGblEnv
@@ -34,11 +34,18 @@ rewriteCalls ids gbl cont
 
 
 rewriteCallsInBind :: UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
-rewriteCallsInBind ids b@(FunBind {}) = do
+rewriteCallsInBind ids b@(FunBind {fun_matches=matches}) = do
   outputTcM "Rewriting calls in bind: " b
-  (b', wanteds) <- captureConstraints $ everywhereM (mkM (rewriteCall ids)) b
+  (matches', wanteds) <- captureConstraints $ everywhereButM (mkQ (return False) skipNestedBind) (mkM (rewriteCall ids)) matches
+  let b' = b{fun_matches=matches'}
   if isEmptyWC wanteds then return b' else rewriteEvAfterCalls wanteds b'
 rewriteCallsInBind _ b = return b
+
+skipNestedBind :: HsBindLR GhcTc GhcTc -> TcM Bool
+skipNestedBind (FunBind {fun_id=fid}) = do
+  outputTcM "Skipping nested bind: " fid 
+  return True
+skipNestedBind _ = return False
 
 rewriteEvAfterCalls :: WantedConstraints -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
 rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=(wrapper, ctick)}) = do

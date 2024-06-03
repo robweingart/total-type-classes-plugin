@@ -1,6 +1,8 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
-module TestPlugin.Rewriter.Utils (outputTcM, printWrapper, printBndrTys, hsWrapperTypeSubst) where
+module TestPlugin.Rewriter.Utils (outputTcM, printWrapper, printBndrTys, hsWrapperTypeSubst, everywhereButM) where
 
 import Data.Foldable (forM_)
 
@@ -9,6 +11,8 @@ import GHC.Tc.Types (TcM)
 import GHC.Tc.Types.Evidence (HsWrapper (..), EvBind(EvBind), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr))
 import GHC.Core.TyCo.Rep (Type(..), Scaled (Scaled))
 import GHC.Core.TyCo.Subst (substTy)
+import Data.Generics.Aliases (GenericQ, GenericM)
+import Data.Generics.Basics (Data(gmapM))
 
 
 printBndrTys :: Type -> TcM ()
@@ -155,3 +159,13 @@ hsWrapperTypeSubst wrap ty = prTypeType $ go wrap (ty, [], empty_subst)
     go (WpTyApp ta)    = \(ty,tas, subst) -> (ty, ta:tas, subst)
     go (WpLet _)       = id
     go (WpMultCoercion _)  = id
+
+everywhereButM :: forall m. Monad m => GenericQ (m Bool) -> GenericM m -> GenericM m
+everywhereButM q f = go
+  where
+    go :: GenericM m
+    go x = do
+      qx <- q x
+      if qx then return x else do
+        x' <- gmapM go x
+        f x'

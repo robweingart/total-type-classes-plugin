@@ -7,7 +7,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-module TestModule ( f, showF, fMono, showFMono, Vec(..), vlength ) where
+module TestModule where
 
 import Data.Proxy
 import TestPlugin
@@ -27,17 +27,36 @@ instance TotalClass MyTotalClass where
 f :: forall (a :: Bool). Proxy a -> Bool
 f x = isTrue x
 
-f' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
-f' x = isTrue x
+--fEta  :: forall (a :: Bool). Proxy a -> Bool
+--fEta = isTrue
+--
+--
+--f' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
+--f' x = isTrue x
+--
+--fMono ::  Bool
+--fMono = isTrue (Proxy :: Proxy True)
+--
+--showF :: forall (a :: Bool). Proxy a -> String
+--showF x = show $ f x
+--
+--showFF :: forall (a :: Bool). Proxy a -> String
+--showFF x = show (f x) ++ show (f x) 
+--
+--showF2 :: forall (a :: Bool). Proxy a -> String
+--showF2 x = show $ fAnd x
+--  where 
+--    fAnd :: forall (b :: Bool). Proxy b -> Bool
+--    fAnd y = isTrue y && isTrue y
 
-fMono ::  Bool
-fMono = isTrue (Proxy :: Proxy True)
-
-showF :: forall (a :: Bool). Proxy a -> String
-showF x = show $ f x
-
-showFMono :: String
-showFMono = show $ f (Proxy :: Proxy True)
+showFAnd :: forall (a :: Bool). Proxy a -> String
+showFAnd x = show $ fAnd x
+  where 
+    fAnd :: forall (b :: Bool). Proxy b -> Bool
+    fAnd y = f y && f y
+--
+--showFMono :: String
+--showFMono = show $ f (Proxy :: Proxy True)
 
 
 data MyNat = Z | S MyNat deriving Show
@@ -58,5 +77,5 @@ data Vec (n :: MyNat) a where
   VNil :: Vec Z a
   VCons :: a -> Vec n a -> Vec (S n) a
 
-vlength :: Vec n a -> MyNat
-vlength (_ :: Vec n a) = natTerm @n
+--vlength :: Vec n a -> MyNat
+--vlength (_ :: Vec n a) = natTerm @n

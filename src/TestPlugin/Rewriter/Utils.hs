@@ -2,7 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module TestPlugin.Rewriter.Utils (outputTcM, printWrapper, printBndrTys, hsWrapperTypeSubst, everywhereButM) where
+module TestPlugin.Rewriter.Utils (printLnTcM, outputTcM, printWrapper, printBndrTys, hsWrapperTypeSubst, everywhereButM) where
 
 import Data.Foldable (forM_)
 
@@ -28,6 +28,9 @@ printBndrTys ty = do
     --Anon _ arg -> outputTcM "anon bndr: " arg
     Anon (Scaled _ (TyConApp _ [TyVarTy var])) _ -> outputTcM "ty var in bndr app: " $ varUnique var
     _ -> return ()
+
+printLnTcM :: String -> TcM ()
+printLnTcM = liftIO . putStrLn 
 
 outputTcM :: Outputable a => String -> a -> TcM ()
 outputTcM str x = do

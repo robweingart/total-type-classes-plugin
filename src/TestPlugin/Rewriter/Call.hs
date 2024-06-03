@@ -32,13 +32,15 @@ rewriteCalls ids gbl cont
       gbl' <- getGblEnv
       cont gbl'
 
-
 rewriteCallsInBind :: UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
 rewriteCallsInBind ids b@(FunBind {fun_matches=matches}) = do
+  printLnTcM "rewriteCallsInBind {"
   outputTcM "Rewriting calls in bind: " b
   (matches', wanteds) <- captureConstraints $ everywhereButM (mkQ (return False) skipNestedBind) (mkM (rewriteCall ids)) matches
   let b' = b{fun_matches=matches'}
-  if isEmptyWC wanteds then return b' else rewriteEvAfterCalls wanteds b'
+  res <- if isEmptyWC wanteds then return b' else rewriteEvAfterCalls wanteds b'
+  printLnTcM "}"
+  return res
 rewriteCallsInBind _ b = return b
 
 skipNestedBind :: HsBindLR GhcTc GhcTc -> TcM Bool
@@ -49,6 +51,7 @@ skipNestedBind _ = return False
 
 rewriteEvAfterCalls :: WantedConstraints -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
 rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=(wrapper, ctick)}) = do
+  printLnTcM "rewriteEvAfterCalls {"
   outputTcM "Captured constraints: " wanteds
   (wc, ebm) <- runTcS $ solveWanteds wanteds
   outputTcM "Resulting wc: " wc
@@ -62,12 +65,14 @@ rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=(wrapper, ctick)}) = do
     0 -> return $ wrapper' <.> WpLet (EvBinds newEvBinds)
     1 -> return wrapper'
     _ -> fail "too many WpLet"
+  printLnTcM "}"
   return b{fun_ext=(wrapper'', ctick)}
 rewriteEvAfterCalls _ _ = fail "invalid arg"
 
 rewriteCall :: UpdateEnv -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
 rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w inner_expr@(HsVar x (L l var)))))
   | Just UInfo{new_id=newId, new_theta=predTys} <- lookupDNameEnv ids (varName var) = do
+    printLnTcM "rewriteCall {"
     outputTcM "Found wrapped call: " expr
     outputTcM "wrapper: " ()
     printWrapper 1 w
@@ -100,6 +105,7 @@ rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w inner_expr@(HsVar x (L l var))))
     outputTcM "New computed outer type 2: " $ wrapped2
     outputTcM "New subst: " $ subst2
     outputTcM "New call: " newExpr 
+    printLnTcM "rewriteCall }"
     return newExpr
   | otherwise = return expr
 rewriteCall _ expr = return expr

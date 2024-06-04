@@ -24,7 +24,7 @@ instance MyTotalClass False where
 instance TotalClass MyTotalClass where
   totalityEvidence = assertTotality
 --
-f :: forall (a :: Bool). Proxy a -> Bool
+f :: forall (a :: Bool) {b :: Bool}. Proxy a -> Bool
 f x = isTrue x
 
 --fEta  :: forall (a :: Bool). Proxy a -> Bool

@@ -9,10 +9,10 @@ import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), isIdHsWrapper)
 import GHC (GhcTc, HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG))
 import Data.Generics (everywhereM, mkM, mkT, everywhere)
-import Control.Monad.State (modify, State, runState)
+import Control.Monad.State (modify, State, runState, MonadState (put, get))
 import GHC.Data.Bag (filterBagM)
 import TestPlugin.Placeholder (isPlaceholder)
-import GHC.Tc.Utils.TcType (mkPhiTy, mkTyCoVarTy, mkTyCoVarTys)
+import GHC.Tc.Utils.TcType (mkPhiTy, mkTyCoVarTy, mkTyCoVarTys, substTy)
 import Data.Maybe (mapMaybe, fromMaybe, fromJust)
 import GHC.Tc.Utils.Monad (newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef)
 import GHC.Tc.Utils.Env (tcExtendGlobalEnvImplicit)
@@ -24,6 +24,7 @@ import TestPlugin.Rewriter.Utils
 import GHC.Tc.Utils.Unify (unifyType)
 import GHC.Core.Unify (tcUnifyTy, alwaysBindFun, tcUnifyTys, matchBindFun)
 import GHC.Hs.Syn.Type (hsWrapperType)
+import Control.Monad (unless)
 
 rewriteBinds :: TcGblEnv -> (UpdateEnv -> TcGblEnv -> TcM TcGblEnv) -> TcM TcGblEnv
 rewriteBinds gbl cont = do
@@ -79,16 +80,16 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
       dFlags <- getDynFlags
       printLnTcM $ "rewriteFunBind " ++ (showSDoc dFlags $ ppr fid) ++ " {"
       let old_ty = varType fid
-      let (old_bndrs, old_inner) = splitInvisPiTys old_ty
-      let (w_bndrs, _) = splitInvisPiTys $ hsWrapperType wrapper $ mkScaledFunTys args res
-      let old_vars = mapMaybe namedBinderVar old_bndrs
-      let w_vars = mapMaybe namedBinderVar w_bndrs
+      let wrapped = hsWrapperType wrapper $ mkScaledFunTys args res
+      let old_vars = mapMaybe namedBinderVar $ fst $ splitInvisPiTys old_ty
+      let w_vars = mapMaybe namedBinderVar $ fst $ splitInvisPiTys wrapped
       let maybeSubst = tcUnifyTys (matchBindFun (mkVarSet w_vars)) (mkTyCoVarTys w_vars) (mkTyCoVarTys old_vars)
       case maybeSubst of
         Nothing -> fail "Failed to unify function type"
         Just subst -> do
           let theta' = substTheta subst theta
-          let new_ty = mkPiTys old_bndrs $ mkPhiTy theta' old_inner
+          let rewrapped = substTy subst $ hsWrapperType wrapper' $ mkScaledFunTys args res
+          new_ty <- copy_flags old_ty rewrapped
           let fid' = setVarType fid new_ty
           let uinfo = UInfo{new_id=fid',old_type=old_ty,new_theta=theta'}
           --outputTcM "Modified id: " fid'
@@ -103,6 +104,35 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
           updTcRef updateEnv (\env -> extendDNameEnv env (varName fid') uinfo)
           printLnTcM "}"
           return b {fun_id=L loc fid', fun_ext=(wrapper', ctick)}
+  where
+    add_flag :: ForAllTyFlag -> State [ForAllTyFlag] ForAllTyFlag
+    add_flag flag = modify (flag :) >> return flag
+
+    get_flags :: Type -> [ForAllTyFlag]
+    get_flags ty = snd $ everywhereM (mkM add_flag) ty `runState` []
+
+    set_flag :: ForAllTyFlag -> State [ForAllTyFlag] ForAllTyFlag
+    set_flag _ = do
+      fs <- get
+      case fs of
+        [] -> error "impossible"
+        (f : fs') -> do
+          put fs'
+          return f
+
+    copy_flags :: Type -> Type -> TcM Type
+    copy_flags src tgt = do
+      let old_flags = get_flags src
+      outputTcM "old flags" old_flags
+      let new_flags = get_flags tgt
+      outputTcM "new flags" new_flags
+      unless (length old_flags == length new_flags) $ fail "number of foralls changed, bug"
+      let (result, remaining_flags) = everywhereM (mkM set_flag) tgt `runState` reverse old_flags
+      unless (null remaining_flags) $ error "impossible"
+      let set_flags = get_flags result
+      outputTcM "set flags" set_flags
+      unless (old_flags == set_flags) $ fail "flag setting failed"
+      return result
 rewriteFunBind _ b = return b
 
 namedBinderVar :: PiTyBinder -> Maybe TyCoVar

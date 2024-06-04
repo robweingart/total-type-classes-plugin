@@ -14,7 +14,7 @@ main = do
   --print $ fMono
   --print $ showF (Proxy :: Proxy True)
   --print $ showF2 (Proxy :: Proxy True)
-  print $ showFAnd (Proxy :: Proxy True)
+  --print $ showFAnd (Proxy :: Proxy True)
   --print $ showFMono
   --print $ vlength $ VCons "hello" $ VCons "world" VNil
   putStrLn "Test suite not yet implemented."

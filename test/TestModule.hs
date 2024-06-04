@@ -49,11 +49,11 @@ f x = isTrue x
 --    fAnd :: forall (b :: Bool). Proxy b -> Bool
 --    fAnd y = isTrue y && isTrue y
 
-showFAnd :: forall (a :: Bool). Proxy a -> String
-showFAnd x = show $ fAnd x
-  where 
-    fAnd :: forall (b :: Bool). Proxy b -> Bool
-    fAnd y = f y && f y
+--showFAnd :: forall (a :: Bool). Proxy a -> String
+--showFAnd x = show $ fAnd x
+--  where 
+--    --fAnd :: forall (b :: Bool). Proxy b -> Bool
+--    fAnd y = f y && f y
 --
 --showFMono :: String
 --showFMono = show $ f (Proxy :: Proxy True)

@@ -43,6 +43,8 @@ rewriteCallsInBind ids b@(FunBind {fun_matches=matches}) = do
   return res
 rewriteCallsInBind _ b = return b
 
+--predsWithBoundFVs :: HsExpr 
+
 skipNestedBind :: HsBindLR GhcTc GhcTc -> TcM Bool
 skipNestedBind (FunBind {fun_id=fid}) = do
   outputTcM "Skipping nested bind: " fid 
@@ -107,7 +109,14 @@ rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w inner_expr@(HsVar x (L l var))))
     outputTcM "New call: " newExpr 
     printLnTcM "rewriteCall }"
     return newExpr
-  | otherwise = return expr
+rewriteCall _ expr@(XExpr (WrapExpr (HsWrap w e))) = do
+  outputTcM "Found WrapExpr: " expr
+  let subst = snd $ hsWrapperTypeSubst w $ hsExprType e
+  outputTcM "  Subst: " subst
+  let (Subst _ _ tvSubstEnv _) = subst
+  nonDetFoldUFM  (\case { TyVarTy var -> (>>) $ outputTcM "  ty var in subst env: " $ varUnique var; _ -> id }) (return ()) tvSubstEnv
+  return expr
+
 rewriteCall _ expr = return expr
 
 addBindsToWpLet :: TcRef Int -> Bag EvBind -> HsWrapper -> TcM HsWrapper

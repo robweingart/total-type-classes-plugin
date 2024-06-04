@@ -11,7 +11,7 @@ import GHC.Tc.Types (TcM)
 import GHC.Tc.Types.Evidence (HsWrapper (..), EvBind(EvBind), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr))
 import GHC.Core.TyCo.Rep (Type(..), Scaled (Scaled))
 import GHC.Core.TyCo.Subst (substTy)
-import Data.Generics.Aliases (GenericQ, GenericM)
+import Data.Generics.Aliases (GenericQ, GenericM, Generic)
 import Data.Generics.Basics (Data(gmapM))
 
 
@@ -172,3 +172,15 @@ everywhereButM q f = go
       if qx then return x else do
         x' <- gmapM go x
         f x'
+
+everywhereButMaybeM :: forall b m. Monad m => GenericQ (m (Maybe b)) -> (GenericM m) -> (b -> GenericM m) -> GenericM m
+everywhereButMaybeM q f g = go 
+  where
+    go :: GenericM m
+    go x = do
+      qx <- q x   
+      case qx of
+        Nothing -> do
+          x' <- gmapM go x
+          f x'
+        Just r -> g r x

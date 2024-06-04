@@ -27,6 +27,9 @@ instance TotalClass MyTotalClass where
 f :: forall (a :: Bool) {b :: Bool}. Proxy a -> Bool
 f x = isTrue x
 
+fWeird :: forall (a :: Bool). MyTotalClass a => forall (b :: Bool). MyTotalClass b => Proxy a -> Proxy b -> Bool
+fWeird x y = isTrue x && isTrue y
+
 --fEta  :: forall (a :: Bool). Proxy a -> Bool
 --fEta = isTrue
 --
@@ -37,8 +40,11 @@ f x = isTrue x
 --fMono ::  Bool
 --fMono = isTrue (Proxy :: Proxy True)
 --
---showF :: forall (a :: Bool). Proxy a -> String
---showF x = show $ f x
+showF :: forall (a :: Bool). Proxy a -> String
+showF x = show $ f x
+--
+showFWeird :: forall (a :: Bool) (b :: Bool). Proxy a -> Proxy b -> String
+showFWeird x y = show $ fWeird x y
 --
 --showFF :: forall (a :: Bool). Proxy a -> String
 --showFF x = show (f x) ++ show (f x) 

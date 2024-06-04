@@ -24,24 +24,30 @@ instance MyTotalClass False where
 instance TotalClass MyTotalClass where
   totalityEvidence = assertTotality
 --
-f :: forall (a :: Bool) {b :: Bool}. Proxy a -> Bool
+f :: forall (a :: Bool). Proxy a -> Bool
 f x = isTrue x
 
-fWeird :: forall (a :: Bool). MyTotalClass a => forall (b :: Bool). MyTotalClass b => Proxy a -> Proxy b -> Bool
+f2 :: forall (a :: Bool). Proxy a -> Bool
+f2 x = isTrue x && isTrue x
+
+fWeird :: forall (a :: Bool). MyTotalClass a => forall (b :: Bool). Proxy a -> Proxy b -> Bool
 fWeird x y = isTrue x && isTrue y
 
 --fEta  :: forall (a :: Bool). Proxy a -> Bool
 --fEta = isTrue
 --
 --
---f' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
---f' x = isTrue x
+f' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
+f' x = isTrue x
+
+f2' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
+f2' x = isTrue x && isTrue x
 --
 --fMono ::  Bool
 --fMono = isTrue (Proxy :: Proxy True)
 --
-showF :: forall (a :: Bool). Proxy a -> String
-showF x = show $ f x
+--showF :: forall (a :: Bool). Proxy a -> String
+--showF x = show $ f x
 --
 showFWeird :: forall (a :: Bool) (b :: Bool). Proxy a -> Proxy b -> String
 showFWeird x y = show $ fWeird x y

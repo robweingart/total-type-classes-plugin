@@ -2,7 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module TestPlugin.Rewriter.Utils (printLnTcM, outputTcM, printWrapper, printBndrTys, hsWrapperTypeSubst, everywhereButM) where
+module TestPlugin.Rewriter.Utils (printLnTcM, outputTcM, outputFullTcM, printWrapper, printBndrTys, hsWrapperTypeSubst, everywhereButM, everywhereButMaybeM) where
 
 import Data.Foldable (forM_)
 
@@ -13,6 +13,7 @@ import GHC.Core.TyCo.Rep (Type(..), Scaled (Scaled))
 import GHC.Core.TyCo.Subst (substTy)
 import Data.Generics.Aliases (GenericQ, GenericM, Generic)
 import Data.Generics.Basics (Data(gmapM))
+import GHC.Hs.Dump (showAstData, BlankSrcSpan (BlankSrcSpan), BlankEpAnnotations (BlankEpAnnotations))
 
 
 printBndrTys :: Type -> TcM ()
@@ -36,6 +37,11 @@ outputTcM :: Outputable a => String -> a -> TcM ()
 outputTcM str x = do
   dFlags <- getDynFlags
   liftIO $ putStrLn $ str ++ showSDoc dFlags (ppr x)
+
+outputFullTcM :: Data a => String -> a -> TcM ()
+outputFullTcM str x = do
+  dFlags <- getDynFlags
+  liftIO $ putStrLn $ str ++ showSDoc dFlags (showAstData BlankSrcSpan BlankEpAnnotations x)
 
 output' :: Outputable a => Int -> String -> a -> TcM ()
 output' n' str = outputTcM (replicate n' ' ' ++ str)
@@ -170,8 +176,8 @@ everywhereButM q f = go
     go x = do
       qx <- q x
       if qx then return x else do
-        x' <- gmapM go x
-        f x'
+        x' <- f x
+        gmapM go x'
 
 everywhereButMaybeM :: forall b m. Monad m => GenericQ (m (Maybe b)) -> (GenericM m) -> (b -> GenericM m) -> GenericM m
 everywhereButMaybeM q f g = go 
@@ -181,6 +187,6 @@ everywhereButMaybeM q f g = go
       qx <- q x   
       case qx of
         Nothing -> do
-          x' <- gmapM go x
-          f x'
+          x' <- f x
+          gmapM go x'
         Just r -> g r x

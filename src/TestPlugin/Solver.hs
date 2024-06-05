@@ -26,15 +26,20 @@ totalClassName = do
   lookupOrig md (mkTcOcc "TotalClass")
 
 wantedCtToTotal :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
-wantedCtToTotal ct = do
-  targetTyConTy <- case getClassPredTys_maybe $ ctPred ct of
-    Just (cls, _) -> return $ mkTyConTy $ classTyCon cls
-    Nothing -> fail "Not a class constraint"
-  totalClass <- totalClassName >>= tcLookupClass
-  let predType = mkTyConApp (classTyCon totalClass) [typeKind targetTyConTy, targetTyConTy] 
-  newCt <- mkNonCanonical <$> newWanted (ctLoc ct) predType
-  (wc, _) <- unsafeTcPluginTcM $ runTcS $ solveWanteds (mkSimpleWC [ctEvidence newCt])
-  if isSolvedWC wc then return $ Just (mkPlaceholder predType, ct) else return Nothing
+wantedCtToTotal ct
+  | Just (targetClass, _) <- getClassPredTys_maybe $ ctPred ct = do
+    totalClass <- totalClassName >>= tcLookupClass
+    if targetClass == totalClass
+    then return Nothing
+    else do
+      let targetTyConTy = mkTyConTy $ classTyCon targetClass
+      let predType = mkTyConApp (classTyCon totalClass) [typeKind targetTyConTy, targetTyConTy] 
+      newCt <- mkNonCanonical <$> newWanted (ctLoc ct) predType
+      (wc, _) <- unsafeTcPluginTcM $ runTcS $ solveWanteds (mkSimpleWC [ctEvidence newCt])
+      if isSolvedWC wc
+      then return $ Just (mkPlaceholder predType, ct)
+      else return Nothing
+  | otherwise = return Nothing
 
 solve :: () -> EvBindsVar -> [Ct] -> [Ct] -> TcPluginM TcPluginSolveResult
 solve () _ _ [] = do
@@ -46,6 +51,3 @@ solve () _ _ wanteds = do
     , tcPluginNewCts = []
     , tcPluginInsolubleCts = []
     }
-
-output :: Outputable a => String -> a -> TcPluginM ()
-output str x = tcPluginIO . putStrLn $ str ++ " " ++ showPprUnsafe x

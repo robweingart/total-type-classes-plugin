@@ -7,10 +7,10 @@ module TestPlugin.Rewriter.Call (rewriteCalls) where
 import GHC.Plugins hiding (TcPlugin)
 import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef)
-import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds)
+import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, isIdHsWrapper)
 import Data.Generics (everywhereM, mkM, everywhereBut, mkQ, GenericM, GenericQ, orElse, listify, Data (gmapM), GenericQ' (unGQ, GQ))
 import GHC.Data.Bag (unionBags, Bag)
-import GHC.Core.TyCo.Rep (Type(..))
+import GHC.Core.TyCo.Rep (Type(..), Scaled (Scaled))
 import GHC.Hs.Syn.Type (hsExprType)
 import GHC.Tc.Utils.Monad (captureConstraints, newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef)
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
@@ -24,8 +24,8 @@ import TestPlugin.Rewriter.Utils
 import GHC.Core.TyCo.Compare (eqType)
 import Control.Monad (unless, forM_)
 import GHC.Core.TyCo.Subst (elemSubst)
-import GHC.Tc.Gen.Head (HsExprArg)
 import Control.Monad.State (modify, State, runState)
+import qualified Data.Map as M
 
 
 rewriteCalls :: UpdateEnv -> TcGblEnv -> (TcGblEnv -> TcM TcGblEnv) -> TcM TcGblEnv
@@ -51,7 +51,8 @@ rewriteCallsInBind ids b@(FunBind {fun_matches=matches}) = do
   printLnTcM "rewriteCallsInBind {"
   outputTcM "Rewriting calls in bind: " b
   outputTcM "Wraps: " $ snd $ runState (everywhereM (mkM recordXExpr) matches) []
-  (matches', wanteds) <- captureConstraints (rewriteWrapsAndIds ids emptyNameSet matches)
+  names_ref <- newTcRef emptyNameSet
+  (matches', wanteds) <- captureConstraints (rewriteWrapsAndIds ids names_ref matches)
   let b' = b{fun_matches=matches'}
   res <- if isEmptyWC wanteds then return b' else rewriteEvAfterCalls wanteds b'
   printLnTcM "}"
@@ -61,8 +62,8 @@ rewriteCallsInBind _ b = return b
 mkQAny ::  [GenericQ' (TcM Bool)] -> GenericQ (TcM Bool)
 mkQAny qs x = foldr (\a b -> liftA2 (||) (unGQ a x) b) (return False) qs
 
-rewriteWrapsAndIds :: UpdateEnv -> NameSet -> GenericM TcM
-rewriteWrapsAndIds ids old_names y = do
+rewriteWrapsAndIds :: UpdateEnv -> TcRef NameSet -> GenericM TcM
+rewriteWrapsAndIds ids namesRef y = do
   printLnTcM "rewriteWrapsAndIds {"
   r <- go y
   printLnTcM "}"
@@ -70,50 +71,26 @@ rewriteWrapsAndIds ids old_names y = do
   where
     qSkip :: GenericQ (TcM Bool)
     qSkip = mkQAny [GQ $ mkQ (return False) skipNestedBind, GQ $ mkQ (return False) skipHsExprGhcRn]
-    qName :: GenericQ (TcM (Maybe (NameSet, HsWrapper)))
-    qName = mkQ (return Nothing) (rewriteWrapper ids old_names)
+    qWrap :: GenericQ (TcM Bool)
+    qWrap = mkQ (return False) isWrapper
     f :: GenericM TcM
-    f = mkM (rewriteVar ids old_names)
-    g :: (NameSet, HsWrapper) -> GenericM TcM
-    g = (\(names, w) -> mkM (rewriteXExpr ids names w))
+    f = mkM (rewriteVar ids namesRef)
+    g :: GenericM TcM
+    g = mkM (rewriteXExpr ids namesRef)
 
     go :: GenericM TcM
     go x = do
       skip <- qSkip x
       if skip then return x else do
-        res <- qName x
-        case res of
-          Nothing -> do
-            x' <- f x
-            gmapM go x'
-          Just r -> g r x
+        isWrap <- qWrap x
+        if isWrap then do g x
+        else do
+          x' <- f x
+          gmapM go x'
 
-rewriteWrapper :: UpdateEnv -> NameSet -> HsExpr GhcTc -> TcM (Maybe (NameSet, HsWrapper))
-rewriteWrapper ids names expr@(XExpr (WrapExpr (HsWrap w inner_expr))) = do
-  let all_us = eltsDNameEnv ids
-  let subst = snd $ hsWrapperTypeSubst w (hsExprType inner_expr)
-  let us = filter ((`elemSubst` subst) . last_ty_var) all_us
-  case us of
-    [] -> do
-      --printLnTcM "No relevant names, skipping"
-      return Nothing
-    [UInfo{new_id=id', new_theta=theta, last_ty_var=tv}] -> do
-      outputTcM "rewriteWrapper " expr 
-      let name = idName id'
-      outputTcM "Name we expect to find here: " name
-      let theta' = substTheta subst theta
-      let last_ty_arg = substTyVar subst tv
-      outputTcM "Last ty var bound to: " last_ty_arg
-      new_ev_apps <- instCallConstraints (OccurrenceOf name) theta'
-      w' <- everywhereM (mkM (insertWrapperBefore new_ev_apps last_ty_arg)) w
-      outputTcM "New wrapper: " () 
-      printWrapper 1 w'
-      return $ Just (extendNameSet names name, w')
-    _ -> do
-      outputTcM "Encountered tvs relating to multiple names: " names
-      fail "Multiple names"
-rewriteWrapper _ _ _ = do 
-  return Nothing
+isWrapper ::  HsExpr GhcTc -> TcM Bool
+isWrapper (XExpr (WrapExpr (HsWrap w inner_expr))) = return True
+isWrapper _ = return False
 
 insertWrapperBefore :: HsWrapper -> Type -> HsWrapper -> TcM HsWrapper
 insertWrapperBefore new_w ty w@(WpTyApp ty')
@@ -148,86 +125,122 @@ rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=(wrapper, ctick)}) = do
   wrapper'' <- case changes of
     0 -> return $ wrapper' <.> WpLet (EvBinds newEvBinds)
     1 -> return wrapper'
-    _ -> fail "too many WpLet"
+    _ -> failTcM "too many WpLet"
   printLnTcM "}"
   return b{fun_ext=(wrapper'', ctick)}
-rewriteEvAfterCalls _ _ = fail "invalid arg"
+rewriteEvAfterCalls _ _ = failTcM "invalid arg"
 
-rewriteXExpr :: UpdateEnv -> NameSet -> HsWrapper -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
-rewriteXExpr ids names new_w expr@(XExpr (WrapExpr (HsWrap _ inner_expr))) = do
+rewriteWrapper :: UpdateEnv -> NameSet -> HsExpr GhcTc -> TcM (Maybe (NameSet, HsWrapper))
+rewriteWrapper ids names expr@(XExpr (WrapExpr (HsWrap w inner_expr))) = do
+  let all_us = eltsDNameEnv ids
+  let subst = snd $ hsWrapperTypeSubst w (hsExprType inner_expr)
+  let us = filter ((`elemSubst` subst) . last_ty_var) all_us
+  case us of
+    [] -> do
+      --printLnTcM "No relevant names, skipping"
+      return Nothing
+    [UInfo{new_id=id', new_theta=theta, last_ty_var=tv}] -> do
+      outputTcM "rewriteWrapper " expr 
+      let name = idName id'
+      outputTcM "Name we expect to find here: " name
+      let theta' = substTheta subst theta
+      let last_ty_arg = substTyVar subst tv
+      outputTcM "Last ty var bound to: " last_ty_arg
+      new_ev_apps <- instCallConstraints (OccurrenceOf name) theta'
+      w' <- everywhereM (mkM (insertWrapperBefore new_ev_apps last_ty_arg)) w
+      outputTcM "New wrapper: " () 
+      printWrapper 1 w'
+      return $ Just (extendNameSet names name, w')
+    _ -> do
+      outputTcM "Encountered tvs relating to multiple names: " names
+      failTcM "Multiple names"
+rewriteWrapper _ _ _ = do 
+  return Nothing
+
+rewriteXExpr :: UpdateEnv -> TcRef NameSet -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
+rewriteXExpr ids names_ref expr@(XExpr (WrapExpr (HsWrap w inner_expr))) = do
   outputTcM "rewriteXExpr " expr
   outputFullTcM "inner expr: " inner_expr
-  outputTcM "old type of inner expr: " $ hsExprType inner_expr
-  inner_expr' <- rewriteWrapsAndIds ids names inner_expr
-  outputTcM "new type of inner expr: " $ hsExprType inner_expr'
-  return $ XExpr (WrapExpr (HsWrap new_w inner_expr'))
-rewriteXExpr _ _ _ expr = return expr
+  new_names_ref <- newTcRef emptyNameSet
+  inner_expr' <- rewriteWrapsAndIds ids new_names_ref inner_expr
+  let outer_ty = hsExprType expr
+  let inner_ty = hsExprType inner_expr
+  let inner_ty' = hsExprType inner_expr'
+  if eqType inner_ty inner_ty' then return expr else do
+    outputTcM "old type of outer expr: " $ outer_ty
+    outputTcM "old type of inner expr: " $ inner_ty
+    printBndrTys inner_ty
+    outputTcM "new type of inner expr: " $ inner_ty'
+    printBndrTys inner_ty'
+    let subst = snd $ hsWrapperTypeSubst w (hsExprType inner_expr)
+    outputTcM "Subst: " subst
+    let (outer_bndrs, _) = splitInvisPiTys (hsExprType expr)
+    let (inner_bndrs, _) = splitInvisPiTys (hsExprType inner_expr)
+    let (new_inner_bndrs, _) = splitInvisPiTys (hsExprType inner_expr')
+    let relevant_bndrs = reverse $ dropList outer_bndrs $ reverse inner_bndrs
+    outputTcM "Relevant binders: " relevant_bndrs
+    new_names <- readTcRef new_names_ref
+    let relevant_us = filterDNameEnv ((`elemNameSet` new_names) . idName . new_id) ids
+    --let us' = mkVarEnv $ map (\UInfo{new_id=id', new_theta=theta, last_ty_var=tv} -> (substTyVar subst tv, (idName id', substTheta subst theta))) us
+    new_wraps <- instRelevantCallConstraints relevant_us subst relevant_bndrs new_inner_bndrs
+    (new_w, remaining_bndrs) <- insertEvApps w new_wraps
+    case remaining_bndrs of
+      [] -> return $ XExpr (WrapExpr (HsWrap new_w inner_expr'))
+      _ -> failTcM "Too many new wrappers"
+rewriteXExpr _ _ expr = return expr
 
-rewriteVar ::  UpdateEnv -> NameSet -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
-rewriteVar ids expected_names expr@(HsVar x (L l var)) = do
+instRelevantCallConstraints :: UpdateEnv -> Subst -> [PiTyBinder] -> [PiTyBinder] -> TcM [HsWrapper]
+instRelevantCallConstraints updates subst old_relevant_bndrs new_bndrs = go old_relevant_bndrs new_bndrs [] >>= mapM inst 
+  where
+    go [] _ acc = return acc
+    go ((Named (Bndr tv _)) : bs) ((Named (Bndr tv' _)) : bs') tss = go bs bs' ((tv, []) : tss)
+    go ((Anon (Scaled m t) f) : bs) ((Anon (Scaled m' t') f') : bs') tss
+      | eqType m m' && eqType t t' && f == f' = go bs bs' tss
+    go bs ((Anon (Scaled _ ty) _) : bs') ((tv, ts) : tss) = go bs bs' ((tv, ty : ts) : tss)
+    go _ _ _ = failTcM "binders don't match"
+
+    names_matching tv = map (idName . new_id) $ eltsDNameEnv $ filterDNameEnv ((== tv) . last_ty_var) updates 
+
+    get_name tv = case names_matching tv of
+      [] -> failTcM "no name matches"
+      [n] -> return n
+      _ -> failTcM "ambiguous"
+    
+    inst (_, []) = return WpHole
+    inst (tv, tss) = do
+      name <- get_name tv
+      let theta = substTheta subst $ reverse tss
+      instCallConstraints (OccurrenceOf name) theta
+        
+insertEvApps :: HsWrapper -> [HsWrapper] -> TcM (HsWrapper, [HsWrapper])
+insertEvApps WpHole ws = return (WpHole, ws) 
+insertEvApps (WpCompose w1 w2) ws = do
+  (w2', ws1) <- insertEvApps w2 ws
+  (w1', ws2) <- insertEvApps w1 ws1
+  return (w1' <.> w2', ws2)
+insertEvApps (WpFun _ _ _) _ = failTcM "WpFun unsupported"
+insertEvApps (WpCast _) _ = failTcM "WpCast unsupported"
+insertEvApps (WpEvLam _) _ = failTcM "unexpected ev lambda"
+insertEvApps w@(WpEvApp _) ws = return (w, ws)
+insertEvApps (WpTyLam _) _ = failTcM "unexpected ty lambda"
+insertEvApps w@(WpTyApp _) (new_w : ws) = return (new_w <.> w, ws)
+insertEvApps (WpTyApp _) [] = failTcM "not enough new wrappers"
+insertEvApps (WpLet _) _ = failTcM "unexpected WpLet"
+insertEvApps (WpMultCoercion _) _ = failTcM "WpMultCoercion unsupported"
+
+rewriteVar ::  UpdateEnv -> TcRef NameSet -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
+rewriteVar ids namesRef expr@(HsVar x (L l var)) = do
   let res = lookupDNameEnv ids $ varName var
-  let expected = elemNameSet (varName var) expected_names
-  case (res, expected) of
-    (Nothing, _) -> return expr
-    (Just _, False) -> do
-      outputTcM "Found occurrence of id outside last ty var application: " var
-      fail "Call without wrapper"
-    (Just UInfo{new_id=id'}, True) -> do 
+  case res of
+    Nothing -> return expr
+    Just UInfo{new_id=id'} -> do 
       outputTcM "Updating type of occurrence: " expr
+      updTcRef namesRef (`extendNameSet` varName var)
       return (HsVar x (L l id'))
-      
 rewriteVar _ _ expr = return expr
 
-rewriteCall :: UpdateEnv -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
-rewriteCall ids expr@(XExpr (WrapExpr (HsWrap w inner_expr@(HsVar x (L l var)))))
-  | Just UInfo{new_id=newId, new_theta=predTys} <- lookupDNameEnv ids (varName var) = do
-    printLnTcM "rewriteCall {"
-    outputTcM "Found wrapped call: " expr
-    outputTcM "wrapper: " ()
-    printWrapper 1 w
-    outputTcM "type: " $ hsExprType expr
-    case hsExprType expr of
-      FunTy _ _ (TyConApp _ [_, TyVarTy tyVar]) _ -> outputTcM "Ty var in arg: " $ varUnique tyVar
-      _ -> return ()
-    outputTcM "inner type: " $ varType var
-    printBndrTys $ varType var
-
-    let inner_ty = hsExprType inner_expr
-    let outer_ty = hsExprType expr
-    let (wrapped_ty, subst) = hsWrapperTypeSubst w inner_ty
-    outputTcM "Computed outer type: " wrapped_ty
-    unless (eqType outer_ty wrapped_ty) $ fail "hsWrapperTypeSubst type mismatch"
-    outputTcM "Subst: " subst
-    let (Subst _ _ tvSubstEnv _) = subst
-    nonDetFoldUFM  (\case { TyVarTy var -> (>>) $ outputTcM "ty var in subst env: " $ varUnique var; _ -> id }) (return ()) tvSubstEnv
-    let theta = substTheta subst predTys
-    outputTcM "Constraints to add: " $ theta
-    w' <- instCallConstraints (OccurrenceOf (varName var)) theta
-    let newWrap = w' <.> w
-    outputTcM "New wrapper: " () 
-    printWrapper 1 newWrap
-    let (new_wrapped_ty, _) = hsWrapperTypeSubst w inner_ty
-    outputTcM "New computed outer type: " new_wrapped_ty
-    unless (eqType outer_ty new_wrapped_ty) $ fail "adding theta changed type"
-    let newExpr = XExpr (WrapExpr (HsWrap newWrap (HsVar x (L l newId))))
-    let (wrapped2, subst2) = hsWrapperTypeSubst newWrap $ varType newId
-    outputTcM "New computed outer type 2: " $ wrapped2
-    outputTcM "New subst: " $ subst2
-    outputTcM "New call: " newExpr 
-    printLnTcM "rewriteCall }"
-    return newExpr
-rewriteCall _ expr@(XExpr (WrapExpr (HsWrap w e))) = do
-  outputTcM "Found WrapExpr: " expr
-  let subst = snd $ hsWrapperTypeSubst w $ hsExprType e
-  outputTcM "  Subst: " subst
-  let (Subst _ _ tvSubstEnv _) = subst
-  nonDetFoldUFM  (\case { TyVarTy var -> (>>) $ outputTcM "  ty var in subst env: " $ varUnique var; _ -> id }) (return ()) tvSubstEnv
-  return expr
-
-rewriteCall _ expr = return expr
-
 addBindsToWpLet :: TcRef Int -> Bag EvBind -> HsWrapper -> TcM HsWrapper
-addBindsToWpLet _ _ (WpLet (TcEvBinds _)) = fail "Encountered unzonked TcEvBinds, this should not happen"
+addBindsToWpLet _ _ (WpLet (TcEvBinds _)) = failTcM "Encountered unzonked TcEvBinds, this should not happen"
 addBindsToWpLet counter binds (WpLet (EvBinds binds')) = do
   let newBinds = unionBags binds binds'
   updTcRef counter (+1)

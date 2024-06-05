@@ -2,7 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module TestPlugin.Rewriter.Utils (printLnTcM, outputTcM, outputFullTcM, printWrapper, printBndrTys, hsWrapperTypeSubst, everywhereButM, everywhereButMaybeM) where
+module TestPlugin.Rewriter.Utils (printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, hsWrapperTypeSubst, everywhereButM, everywhereButMaybeM) where
 
 import Data.Foldable (forM_)
 
@@ -42,6 +42,11 @@ outputFullTcM :: Data a => String -> a -> TcM ()
 outputFullTcM str x = do
   dFlags <- getDynFlags
   liftIO $ putStrLn $ str ++ showSDoc dFlags (showAstData BlankSrcSpan BlankEpAnnotations x)
+
+failTcM :: String -> TcM a
+failTcM str = do
+  printLnTcM str
+  fail str
 
 output' :: Outputable a => Int -> String -> a -> TcM ()
 output' n' str = outputTcM (replicate n' ' ' ++ str)

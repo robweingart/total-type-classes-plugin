@@ -5,12 +5,12 @@
 module TestPlugin.Rewriter.Call (rewriteCalls) where
 
 import GHC.Plugins hiding (TcPlugin)
-import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn, LHsBind, LHsExpr, HsBind, LHsBinds)
-import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef, TcLclEnv)
-import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, isIdHsWrapper, mkWpLet, isEmptyEvBindMap, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar))
-import Data.Generics (everywhereM, mkM, everywhereBut, mkQ, GenericM, GenericQ, orElse, listify, Data (gmapM), GenericQ' (unGQ, GQ))
+import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn, LHsBind, LHsExpr, LHsBinds)
+import GHC.Tc.Types (TcM, TcGblEnv (..), TcLclEnv)
+import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, isEmptyEvBindMap, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar))
+import Data.Generics (everywhereM, mkM, mkQ, GenericM, GenericQ, Data (gmapM), GenericQ' (unGQ, GQ))
 import GHC.Hs.Syn.Type (hsExprType)
-import GHC.Tc.Utils.Monad (captureConstraints, newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef, wrapLocMA, getEnvs, updGblEnv, pushLevelAndCaptureConstraints)
+import GHC.Tc.Utils.Monad (captureConstraints, newTcRef, readTcRef, updTcRef, wrapLocMA, getEnvs, updGblEnv)
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
 import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf), SkolemInfoAnon (UnkSkol))
 
@@ -19,7 +19,6 @@ import TestPlugin.Rewriter.Utils
 import GHC.Core.TyCo.Compare (eqType)
 import Control.Monad (unless, forM_)
 import GHC.Core.TyCo.Subst (elemSubst)
-import Control.Monad.State (modify, State)
 import GHC.Tc.Utils.Unify (checkConstraints)
 import GHC.Tc.Utils.Env (tcExtendNameTyVarEnv)
 import GHC.Tc.Utils.TcType (mkTyVarNamePairs)
@@ -33,17 +32,13 @@ rewriteCalls :: UpdateEnv -> LHsBinds GhcTc -> (LHsBinds GhcTc -> TcM (TcGblEnv,
 rewriteCalls ids binds cont
   | isEmptyDNameEnv ids = do
     printLnTcM "No new modified ids, ending loop"
-    outputFullTcM "Full: " binds
+    --outputFullTcM "Full: " binds
     getEnvs
   | otherwise = do
     forM_ ids (outputTcM "")
     binds' <- everywhereM (mkM (rewriteCallsInLHsBind ids)) binds
     updGblEnv (\gbl -> gbl{tcg_binds=binds'}) $ do
       cont binds'
-
-recordXExpr :: HsExpr GhcTc -> State [HsExpr GhcTc] (HsExpr GhcTc)
-recordXExpr (XExpr (WrapExpr (HsWrap _ inner_expr))) = modify (inner_expr : ) >> return inner_expr
-recordXExpr expr = return expr
 
 rewriteCallsInLHsBind :: UpdateEnv -> LHsBind GhcTc -> TcM (LHsBind GhcTc)
 rewriteCallsInLHsBind updates = wrapLocMA (rewriteCallsInFunBind updates)

@@ -1,23 +1,20 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
-module TestPlugin.Rewriter.Utils (printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, hsWrapperTypeSubst, everywhereButM, everywhereButMaybeM) where
+module TestPlugin.Rewriter.Utils (printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, hsWrapperTypeSubst) where
 
 import Data.Foldable (forM_)
 
-import GHC.Plugins hiding (substTy)
+import GHC.Plugins
 import GHC.Tc.Types (TcM)
 import GHC.Tc.Types.Evidence (HsWrapper (..), EvBind(EvBind), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr))
 import GHC.Core.TyCo.Rep (Type(..), Scaled (Scaled))
 import GHC.Core.TyCo.Subst (substTy)
-import Data.Generics.Aliases (GenericQ, GenericM, Generic)
-import Data.Generics.Basics (Data(gmapM))
 import GHC.Hs.Dump (showAstData, BlankSrcSpan (BlankSrcSpan), BlankEpAnnotations (BlankEpAnnotations))
 import GHC.Tc.Utils.Monad (failWith)
 import GHC.Tc.Errors.Types (TcRnMessage(TcRnUnknownMessage))
 import GHC.Utils.Error (mkPlainError)
-import GHC.Types.Error (mkUnknownDiagnostic, mkSimpleUnknownDiagnostic)
+import GHC.Types.Error (mkSimpleUnknownDiagnostic)
+import Data.Data (Data)
 
 
 printBndrTys :: Type -> TcM ()
@@ -115,21 +112,21 @@ piResultTysSubst ty orig_args@(arg:args)
     init_subst = mkEmptySubst $ mkInScopeSet (tyCoVarsOfTypes (ty:orig_args))
 
     go :: Subst -> Type -> [Type] -> (Type, Subst)
-    go subst ty [] = (substTyUnchecked subst ty, subst)
+    go subst ty' [] = (substTyUnchecked subst ty', subst)
 
-    go subst ty all_args@(arg:args)
-      | FunTy { ft_res = res } <- ty
-      = go subst res args
+    go subst ty' all_args@(arg':args')
+      | FunTy { ft_res = res } <- ty'
+      = go subst res args'
 
-      | ForAllTy (Bndr tv _) res <- ty
-      = go (extendTCvSubst subst tv arg) res args
+      | ForAllTy (Bndr tv _) res <- ty'
+      = go (extendTCvSubst subst tv arg') res args'
 
-      | Just ty' <- coreView ty
-      = go subst ty' all_args
+      | Just ty'' <- coreView ty'
+      = go subst ty'' all_args
 
       | not (isEmptyTCvSubst subst)  -- See Note [Care with kind instantiation]
       = go init_subst
-          (substTy subst ty)
+          (substTy subst ty')
           all_args
 
       | otherwise
@@ -138,7 +135,7 @@ piResultTysSubst ty orig_args@(arg:args)
         -- Without the explicit isEmptyVarEnv test, an ill-kinded type
         -- would give an infinite loop, which is very unhelpful
         -- c.f. #15473
-        pprPanic "piResultTysSubst2" (ppr ty $$ ppr orig_args $$ ppr all_args)
+        pprPanic "piResultTysSubst2" (ppr ty' $$ ppr orig_args $$ ppr all_args)
 
 -- | The PRType (ty, tas) is short for (piResultTys ty (reverse tas))
 type PRType = (Type, [Type], Subst)
@@ -172,28 +169,6 @@ hsWrapperTypeSubst wrap ty = prTypeType $ go wrap (ty, [], empty_subst)
     go (WpEvLam v)     = liftPRType $ mkInvisFunTy (idType v)
     go (WpEvApp _)    = liftPRType $ funResultTy
     go (WpTyLam tv)    = liftPRType $ mkForAllTy (Bndr tv Inferred)
-    go (WpTyApp ta)    = \(ty,tas, subst) -> (ty, ta:tas, subst)
+    go (WpTyApp ta)    = \(ty',tas, subst) -> (ty', ta:tas, subst)
     go (WpLet _)       = id
     go (WpMultCoercion _)  = id
-
-everywhereButM :: forall m. Monad m => GenericQ (m Bool) -> GenericM m -> GenericM m
-everywhereButM q f = go
-  where
-    go :: GenericM m
-    go x = do
-      qx <- q x
-      if qx then return x else do
-        x' <- f x
-        gmapM go x'
-
-everywhereButMaybeM :: forall b m. Monad m => GenericQ (m (Maybe b)) -> (GenericM m) -> (b -> GenericM m) -> GenericM m
-everywhereButMaybeM q f g = go 
-  where
-    go :: GenericM m
-    go x = do
-      qx <- q x   
-      case qx of
-        Nothing -> do
-          x' <- f x
-          gmapM go x'
-        Just r -> g r x

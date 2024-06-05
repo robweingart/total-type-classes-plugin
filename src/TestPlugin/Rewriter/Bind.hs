@@ -14,7 +14,7 @@ import GHC.Data.Bag (filterBagM)
 import TestPlugin.Placeholder (isPlaceholder)
 import GHC.Tc.Utils.TcType (mkTyCoVarTys, substTy)
 import Data.Maybe (mapMaybe)
-import GHC.Tc.Utils.Monad (newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef, wrapLocMA, updGblEnv)
+import GHC.Tc.Utils.Monad (newTcRef, readTcRef, updTcRef, wrapLocMA, updGblEnv)
 import GHC.Tc.Utils.Env (tcExtendGlobalEnvImplicit)
 import GHC.Types.Unique.DFM (plusUDFM)
 import GHC.Core.TyCo.Rep (Type (..))
@@ -73,12 +73,6 @@ rewriteABExport updateEnv e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = d
 
 rewriteFunBind :: TcRef UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
 rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick), fun_matches=MG{mg_ext=(MatchGroupTc args res _)} }) = do
-  dFlags <- getDynFlags
-  printLnTcM $ "starting rewriteFunBind " ++ (showSDoc dFlags $ ppr fid)
-  printLnTcM "old wrapper: "
-  printWrapper 1 wrapper
-  printLnTcM "Inner Wrappers: "
-  _ <- everywhereM (mkM ((\w -> printWrapper 2 w >> return w))) b
   let old_ty = varType fid
   let wrapped = hsWrapperType wrapper $ mkScaledFunTys args res
   let old_vars = mapMaybe namedBinderVar $ fst $ splitInvisPiTys old_ty

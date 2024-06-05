@@ -14,8 +14,4 @@ instance Outputable UpdateInfo where
     , text "Unique of last ty var binder:" <+> ppr (varUnique (last_ty_var u))
     ])
 
-    --forM_ ids $ \UInfo{new_id=id', last_ty_var=tv} -> do
-    --  outputTcM "Id: " id'
-    --  outputTcM "Last ty var: " $ varUnique tv
-
 type UpdateEnv = DNameEnv UpdateInfo

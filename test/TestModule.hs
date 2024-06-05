@@ -11,7 +11,6 @@ module TestModule where
 
 import Data.Proxy
 import TestPlugin
-import Data.Kind (Type)
 
 class MyClass a where
 
@@ -47,8 +46,8 @@ showF x = show $ f x
 --innerWpLet :: forall (a :: Type). MyClass a => Proxy a -> ()
 --innerWpLet (_ :: Proxy b) = (inner @b :: MyClass b => ())
 
---showF' :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
---showF' (x :: Proxy b) = show $ (f' :: MyTotalClass b => Proxy b -> Bool) x
+showF' :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
+showF' (x :: Proxy b) = show $ (f :: MyTotalClass b => Proxy b -> Bool) x
 
 --showFCast :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
 --showFCast x = show $ (f :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool) x

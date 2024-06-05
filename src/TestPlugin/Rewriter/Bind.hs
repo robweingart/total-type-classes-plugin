@@ -8,7 +8,7 @@ import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), isIdHsWrapper)
 import GHC (GhcTc, HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG))
-import Data.Generics (everywhereM, mkM, mkT, everywhere)
+import Data.Generics (everywhereM, mkM, mkT, everywhere, mkQ, listify)
 import Control.Monad.State (modify, State, runState, MonadState (put, get))
 import GHC.Data.Bag (filterBagM)
 import TestPlugin.Placeholder (isPlaceholder)
@@ -81,23 +81,20 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
   let old_vars = mapMaybe namedBinderVar $ fst $ splitInvisPiTys old_ty
   let w_vars = mapMaybe namedBinderVar $ fst $ splitInvisPiTys wrapped
   let maybe_subst = tcUnifyTys (matchBindFun (mkVarSet w_vars)) (mkTyCoVarTys w_vars) (mkTyCoVarTys old_vars)
-  newArgsRef <- newTcRef []
-  wrapper' <- everywhereM (mkM (rewriteWpLet newArgsRef)) wrapper
-  ev_vars <- readTcRef newArgsRef
-  case (ev_vars, maybe_subst) of
-    ([], _) -> return b
-    (_, Nothing) -> fail "Failed to unify function type"
-    (ev_vars', Just subst) -> do
+  wrapper_res <- rewriteHsWrapper wrapper
+  case (wrapper_res, maybe_subst) of
+    (Nothing, _) -> return b
+    (_, Nothing) -> failTcM (text "Failed to unify fun type at " <+> ppr b)
+    (Just (wrapper', theta, last_tv), Just subst) -> do
       dFlags <- getDynFlags
       printLnTcM $ "rewriteFunBind " ++ (showSDoc dFlags $ ppr fid) ++ " {"
-      (wrapper'', last_tv) <- insertWpEvLams ev_vars' wrapper'
       outputTcM "new wrapper: " ()
-      printWrapper 1 wrapper''
-      let theta' = substTheta subst (map varType ev_vars')
+      printWrapper 1 wrapper'
+      let theta' = substTheta subst theta
       last_tv' <- case substTyVar subst last_tv of
         TyVarTy tv -> return tv
         _ -> fail "substitution assigned last tv to something other than a tv"
-      let rewrapped = substTy subst $ hsWrapperType wrapper'' $ mkScaledFunTys args res
+      let rewrapped = substTy subst $ hsWrapperType wrapper' $ mkScaledFunTys args res
       new_ty <- copy_flags old_ty rewrapped
       let fid' = setVarType fid new_ty
       let uinfo = UInfo{new_id=fid',old_type=old_ty,new_theta=theta',last_ty_var=last_tv'}
@@ -112,7 +109,7 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
         _ -> return ()
       updTcRef updateEnv (\env -> extendDNameEnv env (varName fid') uinfo)
       printLnTcM "}"
-      return b {fun_id=L loc fid', fun_ext=(wrapper'', ctick)}
+      return b {fun_id=L loc fid', fun_ext=(wrapper', ctick)}
   where
     add_flag :: ForAllTyFlag -> State [ForAllTyFlag] ForAllTyFlag
     add_flag flag = modify (flag :) >> return flag
@@ -148,14 +145,30 @@ namedBinderVar :: PiTyBinder -> Maybe TyCoVar
 namedBinderVar (Named (Bndr var _)) = Just var
 namedBinderVar _ = Nothing
 
-rewriteWpLet :: TcRef [EvVar] -> HsWrapper -> TcM HsWrapper
+rewriteHsWrapper :: HsWrapper -> TcM (Maybe (HsWrapper, [PredType], TyVar))
+rewriteHsWrapper wrapper = do
+  --printLnTcM "rewriteHsWrapper {"
+  newArgsRef <- newTcRef []
+  wrapper' <- everywhereM (mkM (rewriteWpLet newArgsRef)) wrapper
+  tys <- readTcRef newArgsRef
+  res <- case tys of
+    [] -> return Nothing
+    [[]] -> return Nothing
+    [newArgTys] -> do
+      tv <- lastTyVar wrapper
+      return $ Just (wrapper', newArgTys, tv) 
+    _ -> failTcM $ text "encountered multiple WpLet, this should not happen"
+  --printLnTcM "}"
+  return res
+
+rewriteWpLet :: TcRef [[PredType]] -> HsWrapper -> TcM HsWrapper
 rewriteWpLet _ (WpLet (TcEvBinds _)) = fail "Encountered unzonked TcEvBinds, this should not happen"
 rewriteWpLet newArgsRef (WpLet (EvBinds binds)) = do
   --printLnTcM "rewriteWpLet {"
   let (binds', evVars) = runState (filterBagM isNotPlaceholder binds) []
-  updTcRef newArgsRef (++ evVars)
+  updTcRef newArgsRef ((varType <$> evVars) :)
   --printLnTcM "}"
-  return $ WpLet (EvBinds binds')
+  return $ foldr ((<.>) . WpEvLam) (WpLet (EvBinds binds')) evVars
 rewriteWpLet _ w = return w
 
 isNotPlaceholder :: EvBind -> State [EvVar] Bool
@@ -165,35 +178,18 @@ isNotPlaceholder (EvBind {eb_lhs=evVar, eb_rhs=evTerm})
     return False
   | otherwise = return True
 
--- insert an EvLam for each var next to the rightmost TyLam
-insertWpEvLams :: [EvVar] -> HsWrapper -> TcM (HsWrapper, TyVar)
-insertWpEvLams ev_vars wrap = do 
-  tv_ref <- newTcRef Nothing
-  w' <- go1 tv_ref wrap
-  tv <- readTcRef tv_ref
-  case tv of
-    Nothing -> fail "Failed to insert WpEvLams"
-    Just tv' -> return (w', tv')
+lastTyVar :: HsWrapper -> TcM TyVar
+lastTyVar w = go w >>= \case
+  Nothing -> failTcM (text "Wrapper has no WpTyLam" <+> ppr w)
+  Just tv -> return tv
   where
-    go1 tv_ref w = do
-      tv <- readTcRef tv_ref
-      if isJust tv then return w else go2 tv_ref w
-
-    go2 tv_ref (WpCompose w1 w2) = do
-      w2' <- go1 tv_ref w2
-      w1' <- go1 tv_ref w1
-      return $ WpCompose w1' w2'
-    go2 _ w@(WpFun _ _ _) = do
-      outputTcM "Found WpFun" w
-      fail "WpFun not supported"
-    go2 tv_ref w@(WpTyLam tv) = do
-      writeTcRef tv_ref (Just tv)
-      let w' = foldr ((<.>) . WpEvLam) WpHole ev_vars
-      return $ w <.> w'
-    go2 _ w = return w
-
-      
-  
+    go WpHole = return Nothing
+    go (WpCompose w1 w2) = go w2 >>= \case
+      Nothing -> go w1
+      Just tv -> return $ Just tv
+    go (WpTyLam tv) = return $ Just tv
+    go (WpFun _ _ _) = failTcM (text "unexpected WpFun inside " <+> ppr w)
+    go _ = return Nothing
 
 assertNoPlaceholders :: HsWrapper -> TcM HsWrapper
 assertNoPlaceholders w@(WpLet (EvBinds binds))

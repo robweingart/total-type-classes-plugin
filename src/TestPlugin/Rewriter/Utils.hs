@@ -14,6 +14,10 @@ import GHC.Core.TyCo.Subst (substTy)
 import Data.Generics.Aliases (GenericQ, GenericM, Generic)
 import Data.Generics.Basics (Data(gmapM))
 import GHC.Hs.Dump (showAstData, BlankSrcSpan (BlankSrcSpan), BlankEpAnnotations (BlankEpAnnotations))
+import GHC.Tc.Utils.Monad (failWith)
+import GHC.Tc.Errors.Types (TcRnMessage(TcRnUnknownMessage))
+import GHC.Utils.Error (mkPlainError)
+import GHC.Types.Error (mkUnknownDiagnostic, mkSimpleUnknownDiagnostic)
 
 
 printBndrTys :: Type -> TcM ()
@@ -43,10 +47,8 @@ outputFullTcM str x = do
   dFlags <- getDynFlags
   liftIO $ putStrLn $ str ++ showSDoc dFlags (showAstData BlankSrcSpan BlankEpAnnotations x)
 
-failTcM :: String -> TcM a
-failTcM str = do
-  printLnTcM str
-  fail str
+failTcM :: SDoc -> TcM a
+failTcM doc = failWith $ TcRnUnknownMessage $ mkSimpleUnknownDiagnostic $ mkPlainError [] doc
 
 output' :: Outputable a => Int -> String -> a -> TcM ()
 output' n' str = outputTcM (replicate n' ' ' ++ str)

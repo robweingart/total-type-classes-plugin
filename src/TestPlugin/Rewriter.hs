@@ -10,18 +10,19 @@ import GHC.Tc.Zonk.Type (zonkTopDecls)
 
 import TestPlugin.Rewriter.Bind (rewriteBinds)
 import TestPlugin.Rewriter.Call (rewriteCalls)
-import TestPlugin.Rewriter.Utils (printLnTcM)
+import TestPlugin.Rewriter.Utils (printLnTcM, failTcM)
 import GHC.Types.TypeEnv (plusTypeEnv)
 import GHC.Tc.Types.Evidence (EvBind)
+import GHC.Tc.Types.Constraint (isSolvedWC)
+import Control.Monad (unless)
 
 totalTcResultAction :: [CommandLineOption] -> ModSummary -> TcGblEnv -> TcM TcGblEnv
 totalTcResultAction _ _ gbl = do
   printLnTcM  "totalTcResultAction {"
-  ((gbl', lcl), lie) <- setGblEnv gbl $ captureTopConstraints $ rewriteBinds' (tcg_binds gbl)
-  new_ev_binds <- restoreEnvs (gbl', lcl) $ simplifyTop lie
-  gbl'' <- rezonk new_ev_binds gbl'
+  ((gbl', _), lie) <- setGblEnv gbl $ captureTopConstraints $ rewriteBinds' (tcg_binds gbl)
+  unless (isSolvedWC lie) $ failTcM $ text "Uncaptured constraints"
   printLnTcM  "}"
-  return gbl''
+  return gbl'
   where
     rewriteBinds' binds = rewriteBinds binds rewriteCalls' 
     rewriteCalls' env binds = rewriteCalls env binds rewriteBinds'

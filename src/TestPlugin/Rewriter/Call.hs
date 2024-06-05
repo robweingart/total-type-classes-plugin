@@ -7,12 +7,12 @@ module TestPlugin.Rewriter.Call (rewriteCalls) where
 import GHC.Plugins hiding (TcPlugin)
 import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn, LHsBind, LHsExpr, HsBind, LHsBinds)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef, TcLclEnv)
-import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, isIdHsWrapper, mkWpLet)
+import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, isIdHsWrapper, mkWpLet, isEmptyEvBindMap, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar))
 import Data.Generics (everywhereM, mkM, everywhereBut, mkQ, GenericM, GenericQ, orElse, listify, Data (gmapM), GenericQ' (unGQ, GQ))
 import GHC.Hs.Syn.Type (hsExprType)
-import GHC.Tc.Utils.Monad (captureConstraints, newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef, wrapLocMA, getEnvs, updGblEnv)
+import GHC.Tc.Utils.Monad (captureConstraints, newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef, wrapLocMA, getEnvs, updGblEnv, pushLevelAndCaptureConstraints)
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
-import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf))
+import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf), SkolemInfoAnon (UnkSkol))
 
 import TestPlugin.Rewriter.Env
 import TestPlugin.Rewriter.Utils
@@ -23,6 +23,11 @@ import Control.Monad.State (modify, State)
 import GHC.Tc.Utils.Unify (checkConstraints)
 import GHC.Tc.Utils.Env (tcExtendNameTyVarEnv)
 import GHC.Tc.Utils.TcType (mkTyVarNamePairs)
+import GHC.Data.Bag (Bag, unionBags)
+import GHC.Tc.Solver.Monad (runTcS)
+import GHC.Tc.Solver (solveWanteds)
+import GHC.Tc.Types.Constraint (isSolvedWC)
+import GHC.Stack (emptyCallStack)
 
 rewriteCalls :: UpdateEnv -> LHsBinds GhcTc -> (LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteCalls ids binds cont
@@ -59,11 +64,38 @@ reskolemise wrap thing_inside = wrapperLams wrap >>= \case
     res <- thing_inside
     return (wrap, res)
   (tvs, given) -> do
-    (new_ev_binds, result) <- checkConstraints (error "checkConstraints won't inspect this") tvs given $
-      tcExtendNameTyVarEnv (mkTyVarNamePairs tvs) $ do
-        thing_inside
-    return (mkWpLet new_ev_binds <.> wrap, result)
-    
+    ((new_ev_binds, result), wanteds) <- 
+      captureConstraints $ 
+      checkConstraints (UnkSkol emptyCallStack) tvs given $
+      tcExtendNameTyVarEnv (mkTyVarNamePairs tvs) thing_inside
+    (residual, global_ev) <- runTcS $ solveWanteds wanteds
+    unless (isSolvedWC residual) $ failTcM $ text "Unsolved constraints during reskolemisation:" <+> ppr residual
+    unless (isEmptyEvBindMap global_ev) $ failTcM $ text "Reskolemisation produced global ev binds:" <+> ppr global_ev
+
+    ev_binds <- case new_ev_binds of
+      TcEvBinds (EvBindsVar{ebv_binds=ref}) -> evBindMapBinds <$> readTcRef ref
+      TcEvBinds (CoEvBindsVar _ _) -> failTcM $ text "CoEvBindsVar"
+      EvBinds ebs -> return ebs
+    new_wrap <- addToWpLet ev_binds wrap
+    return (new_wrap, result)
+
+addToWpLet :: Bag EvBind -> HsWrapper -> TcM HsWrapper 
+addToWpLet new_binds wrap = do
+  counter <- newTcRef (0 :: Int)
+  let
+    go WpHole = return WpHole
+    go (WpCompose w1 w2) = liftA2 (<.>) (go w1) (go w2)
+    go (WpFun _ _ _) = failTcM $ text "unexpected WpFun"
+    go (WpLet (EvBinds binds)) = do
+      updTcRef counter (+1) :: TcM ()
+      return $ WpLet (EvBinds (binds `unionBags` new_binds))
+    go (WpLet (TcEvBinds _)) = failTcM $ text "Encountered unzonked TcEvBinds, this should not happen"
+    go w = return w
+  w' <- go wrap
+  readTcRef counter >>= \case
+    0 -> return $ w' <.> WpLet (EvBinds new_binds)
+    1 -> return w'
+    _ -> failTcM $ text "Too many WpLet"
 
 wrapperLams :: HsWrapper -> TcM ([TyVar], [EvVar])
 wrapperLams w = go w ([], [])

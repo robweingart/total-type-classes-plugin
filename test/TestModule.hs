@@ -26,11 +26,11 @@ instance MyTotalClass True where
 instance MyTotalClass False where
   isTrue _ = False
 
---instance TotalClass MyTotalClass where
---  totalityEvidence = assertTotality
+instance TotalClass MyTotalClass where
+  totalityEvidence = assertTotality
 --
---f :: forall (a :: Bool). Proxy a -> Bool
---f x = isTrue x
+f :: forall (a :: Bool). Proxy a -> Bool
+f x = isTrue x
 
 --f2 :: forall (a :: Bool). Proxy a -> Bool
 --f2 x = isTrue x && isTrue x
@@ -38,14 +38,14 @@ instance MyTotalClass False where
 --fWeird :: forall (a :: Bool). MyTotalClass a => forall (b :: Bool). Proxy a -> Proxy b -> Bool
 --fWeird x y = isTrue x && isTrue y
 --
---showF :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
---showF x = show $ f x
+showF :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
+showF x = show $ f x
 
-inner :: forall (c :: Type). MyClass [c] => ()
-inner = ()
-
-innerWpLet :: forall (a :: Type). MyClass a => Proxy a -> ()
-innerWpLet (_ :: Proxy b) = (inner @b :: MyClass b => ())
+--inner :: forall (c :: Type). MyClass [c] => ()
+--inner = ()
+--
+--innerWpLet :: forall (a :: Type). MyClass a => Proxy a -> ()
+--innerWpLet (_ :: Proxy b) = (inner @b :: MyClass b => ())
 
 --showF' :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
 --showF' (x :: Proxy b) = show $ (f' :: MyTotalClass b => Proxy b -> Bool) x

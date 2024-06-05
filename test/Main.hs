@@ -13,7 +13,7 @@ main = do
   --print $ showFWeird (Proxy :: Proxy True) (Proxy :: Proxy False)
   --print $ f (Proxy :: Proxy True)
   --print $ fMono
-  --print $ showF' (Proxy :: Proxy True)
+  print $ showF (Proxy :: Proxy True)
   --print $ showF2 (Proxy :: Proxy True)
   --print $ showFAnd (Proxy :: Proxy True)
   --print $ showFMono

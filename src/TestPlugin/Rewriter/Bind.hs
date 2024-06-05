@@ -36,7 +36,7 @@ rewriteBinds gbl cont = do
   printLnTcM "Finished rewriteBinds pass, checking for remaining placeholders"
   binds'' <- everywhereM (mkM checkDoneLHsBind) binds'
   updates <- readTcRef updateEnv
-  setGblEnv gbl{tcg_binds = binds''} $ tcExtendGlobalEnvImplicit ((\UInfo{new_id=id'} -> AnId id') <$> toList updates) $ do
+  setGblEnv gbl{tcg_binds = binds''} $ tcExtendGlobalEnvImplicit (map (AnId . new_id) $ toList updates) $ do
     gbl' <- getGblEnv
     printLnTcM "}"
     cont updates gbl'

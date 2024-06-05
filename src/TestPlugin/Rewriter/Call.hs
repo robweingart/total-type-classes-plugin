@@ -32,9 +32,7 @@ rewriteCalls ids gbl cont
     printLnTcM "No new modified ids, ending loop"
     return gbl
   | otherwise = do
-    forM_ ids $ \UInfo{new_id=id', last_ty_var=tv} -> do
-      outputTcM "Id: " id'
-      outputTcM "Last ty var: " $ varUnique tv
+    forM_ ids (outputTcM "")
     binds' <- everywhereM (mkM (rewriteCallsInLHsBind ids)) (tcg_binds gbl)
     setGblEnv gbl{tcg_binds = binds'} $ do
       gbl' <- getGblEnv

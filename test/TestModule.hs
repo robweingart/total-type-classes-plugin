@@ -46,8 +46,8 @@ f2' x = isTrue x && isTrue x
 --fMono ::  Bool
 --fMono = isTrue (Proxy :: Proxy True)
 --
---showF :: forall (a :: Bool). Proxy a -> String
---showF x = show $ f x
+showF :: forall (a :: Bool). Proxy a -> String
+showF x = show $ f x
 --
 showFWeird :: forall (a :: Bool) (b :: Bool). Proxy a -> Proxy b -> String
 showFWeird x y = show $ fWeird x y

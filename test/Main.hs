@@ -10,6 +10,7 @@ import TestModule
 
 main :: IO ()
 main = do
+  print $ showFWeird (Proxy :: Proxy True) (Proxy :: Proxy False)
   --print $ f (Proxy :: Proxy True)
   --print $ fMono
   --print $ showF (Proxy :: Proxy True)

@@ -5,14 +5,14 @@
 module TestPlugin.Rewriter.Call (rewriteCalls) where
 
 import GHC.Plugins hiding (TcPlugin)
-import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn)
+import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn, LHsBind, LHsExpr, HsBind)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, isIdHsWrapper)
 import Data.Generics (everywhereM, mkM, everywhereBut, mkQ, GenericM, GenericQ, orElse, listify, Data (gmapM), GenericQ' (unGQ, GQ))
 import GHC.Data.Bag (unionBags, Bag)
 import GHC.Core.TyCo.Rep (Type(..), Scaled (Scaled))
 import GHC.Hs.Syn.Type (hsExprType)
-import GHC.Tc.Utils.Monad (captureConstraints, newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef)
+import GHC.Tc.Utils.Monad (captureConstraints, newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef, wrapLocMA)
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
 import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf))
 import GHC.Tc.Solver (solveWanteds)
@@ -35,7 +35,7 @@ rewriteCalls ids gbl cont
     forM_ ids $ \UInfo{new_id=id', last_ty_var=tv} -> do
       outputTcM "Id: " id'
       outputTcM "Last ty var: " $ varUnique tv
-    binds' <- everywhereM (mkM (rewriteCallsInBind ids)) (tcg_binds gbl)
+    binds' <- everywhereM (mkM (rewriteCallsInLHsBind ids)) (tcg_binds gbl)
     setGblEnv gbl{tcg_binds = binds'} $ do
       gbl' <- getGblEnv
       cont gbl'
@@ -44,8 +44,11 @@ recordXExpr :: HsExpr GhcTc -> State [HsExpr GhcTc] (HsExpr GhcTc)
 recordXExpr (XExpr (WrapExpr (HsWrap _ inner_expr))) = modify (inner_expr : ) >> return inner_expr
 recordXExpr expr = return expr
 
-rewriteCallsInBind :: UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
-rewriteCallsInBind ids b@(FunBind {fun_matches=matches}) = do
+rewriteCallsInLHsBind :: UpdateEnv -> LHsBind GhcTc -> TcM (LHsBind GhcTc)
+rewriteCallsInLHsBind updates = wrapLocMA (rewriteCallsInFunBind updates)
+
+rewriteCallsInFunBind :: UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
+rewriteCallsInFunBind ids b@(FunBind {fun_matches=matches}) = do
   printLnTcM "rewriteCallsInBind {"
   outputTcM "Rewriting calls in bind: " b
   outputTcM "Wraps: " $ snd $ runState (everywhereM (mkM recordXExpr) matches) []
@@ -54,7 +57,7 @@ rewriteCallsInBind ids b@(FunBind {fun_matches=matches}) = do
   res <- if isEmptyWC wanteds then return b' else rewriteEvAfterCalls wanteds b'
   printLnTcM "}"
   return res
-rewriteCallsInBind _ b = return b
+rewriteCallsInFunBind _ b = return b
 
 mkQAny ::  [GenericQ' (TcM Bool)] -> GenericQ (TcM Bool)
 mkQAny qs x = foldr (\a b -> liftA2 (||) (unGQ a x) b) (return False) qs
@@ -69,11 +72,11 @@ rewriteWrapsAndIds ids y = do
     qSkip :: GenericQ (TcM Bool)
     qSkip = mkQAny [GQ $ mkQ (return False) skipNestedBind, GQ $ mkQ (return False) skipHsExprGhcRn]
     qWrap :: GenericQ (TcM Bool)
-    qWrap = mkQ (return False) isWrapper
+    qWrap = mkQ (return False) isLWrapExpr
     f :: GenericM TcM
-    f = mkM (noRewriteVar ids)
+    f = mkM (noRewriteLVar ids)
     g :: GenericM TcM
-    g = mkM (rewriteWrapExpr ids)
+    g = mkM (rewriteLWrapExpr ids)
 
     go :: GenericM TcM
     go x = do
@@ -85,9 +88,9 @@ rewriteWrapsAndIds ids y = do
           x' <- f x
           gmapM go x'
 
-isWrapper ::  HsExpr GhcTc -> TcM Bool
-isWrapper (XExpr (WrapExpr (HsWrap _ _))) = return True
-isWrapper _ = return False
+isLWrapExpr :: LHsExpr GhcTc -> TcM Bool
+isLWrapExpr (L _(XExpr (WrapExpr (HsWrap _ _)))) = return True
+isLWrapExpr _ = return False
 
 skipNestedBind :: HsBindLR GhcTc GhcTc -> TcM Bool
 skipNestedBind (FunBind {fun_id=fid}) = do
@@ -102,10 +105,16 @@ skipHsExprGhcRn expr = do
   outputTcM "Skipping rn expr " expr 
   return True
 
+noRewriteLVar :: UpdateEnv -> LHsExpr GhcTc -> TcM (LHsExpr GhcTc)
+noRewriteLVar updates = wrapLocMA (noRewriteVar updates)
+
 noRewriteVar :: UpdateEnv -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
 noRewriteVar updates expr@(HsVar _ (L _ var))
   | Just _ <- lookupDNameEnv updates (varName var) = failTcM (text "call to modified function " <+> ppr expr <+> text " is not immediate child of a wrapper")
 noRewriteVar _ expr = return expr
+
+rewriteLWrapExpr :: UpdateEnv -> LHsExpr GhcTc -> TcM (LHsExpr GhcTc)
+rewriteLWrapExpr updates = wrapLocMA (rewriteWrapExpr updates)
 
 rewriteWrapExpr :: UpdateEnv -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
 rewriteWrapExpr updates outer@(XExpr (WrapExpr (HsWrap _ _))) = do
@@ -137,9 +146,9 @@ rewriteWrapExpr updates outer@(XExpr (WrapExpr (HsWrap _ _))) = do
     go expr = do
       expr' <- rewriteWrapsAndIds updates expr
       unless (hsExprType expr `eqType` hsExprType expr') $
-        failTcM (text "Inner type is not a changed id, but its type changed " <+> ppr expr')
+        failTcM $ text "Inner type is not a changed id, but its type changed " <+> ppr expr'
       return (expr', Nothing)
-rewriteWrapExpr _ expr = failTcM (text "rewriteWrapExpr called on wrong expr type " <+> ppr expr)
+rewriteWrapExpr _ expr = failTcM $ text "rewriteWrapExpr called on wrong expr type " <+> ppr expr
 
 rewriteEvAfterCalls :: WantedConstraints -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
 rewriteEvAfterCalls wanteds b@(FunBind {fun_ext=(wrapper, ctick)}) = do

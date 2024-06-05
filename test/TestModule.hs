@@ -11,6 +11,11 @@ module TestModule where
 
 import Data.Proxy
 import TestPlugin
+import Data.Kind (Type)
+
+class MyClass a where
+
+instance MyClass a => MyClass [a]
 
 class MyTotalClass (a :: Bool) where
   isTrue :: Proxy a -> Bool
@@ -21,36 +26,51 @@ instance MyTotalClass True where
 instance MyTotalClass False where
   isTrue _ = False
 
-instance TotalClass MyTotalClass where
-  totalityEvidence = assertTotality
+--instance TotalClass MyTotalClass where
+--  totalityEvidence = assertTotality
 --
-f :: forall (a :: Bool). Proxy a -> Bool
-f x = isTrue x
+--f :: forall (a :: Bool). Proxy a -> Bool
+--f x = isTrue x
 
-f2 :: forall (a :: Bool). Proxy a -> Bool
-f2 x = isTrue x && isTrue x
+--f2 :: forall (a :: Bool). Proxy a -> Bool
+--f2 x = isTrue x && isTrue x
+--
+--fWeird :: forall (a :: Bool). MyTotalClass a => forall (b :: Bool). Proxy a -> Proxy b -> Bool
+--fWeird x y = isTrue x && isTrue y
+--
+--showF :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
+--showF x = show $ f x
 
-fWeird :: forall (a :: Bool). MyTotalClass a => forall (b :: Bool). Proxy a -> Proxy b -> Bool
-fWeird x y = isTrue x && isTrue y
+inner :: forall (c :: Type). MyClass [c] => ()
+inner = ()
+
+innerWpLet :: forall (a :: Type). MyClass a => Proxy a -> ()
+innerWpLet (_ :: Proxy b) = (inner @b :: MyClass b => ())
+
+--showF' :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
+--showF' (x :: Proxy b) = show $ (f' :: MyTotalClass b => Proxy b -> Bool) x
+
+--showFCast :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
+--showFCast x = show $ (f :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool) x
 
 --fEta  :: forall (a :: Bool). Proxy a -> Bool
---fEta = isTrue
+--fEta = f
 --
 --
-f' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
-f' x = isTrue x
-
-f2' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
-f2' x = isTrue x && isTrue x
+--f' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
+--f' x = isTrue x
+--
+--f2' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
+--f2' x = isTrue x && isTrue x
 --
 --fMono ::  Bool
 --fMono = isTrue (Proxy :: Proxy True)
 --
-showF :: forall (a :: Bool). Proxy a -> String
-showF x = show $ f x
+--showF :: forall (a :: Bool). Proxy a -> String
+--showF x = show $ f x
 --
-showFWeird :: forall (a :: Bool) (b :: Bool). Proxy a -> Proxy b -> String
-showFWeird x y = show $ fWeird x y
+--showFWeird :: forall (a :: Bool) (b :: Bool). Proxy a -> Proxy b -> String
+--showFWeird x y = show $ fWeird x y
 --
 --showFF :: forall (a :: Bool). Proxy a -> String
 --showFF x = show (f x) ++ show (f x) 
@@ -71,23 +91,23 @@ showFWeird x y = show $ fWeird x y
 --showFMono = show $ f (Proxy :: Proxy True)
 
 
-data MyNat = Z | S MyNat deriving Show
-
-class IsNat (n :: MyNat) where
-  natTerm :: MyNat
-
-instance IsNat Z where
-  natTerm = Z
-
-instance IsNat n => IsNat (S n) where
-  natTerm = S (natTerm @n)
-
-instance TotalClass IsNat where
-  totalityEvidence = assertTotality
-
-data Vec (n :: MyNat) a where
-  VNil :: Vec Z a
-  VCons :: a -> Vec n a -> Vec (S n) a
+--data MyNat = Z | S MyNat deriving Show
+--
+--class IsNat (n :: MyNat) where
+--  natTerm :: MyNat
+--
+--instance IsNat Z where
+--  natTerm = Z
+--
+--instance IsNat n => IsNat (S n) where
+--  natTerm = S (natTerm @n)
+--
+--instance TotalClass IsNat where
+--  totalityEvidence = assertTotality
+--
+--data Vec (n :: MyNat) a where
+--  VNil :: Vec Z a
+--  VCons :: a -> Vec n a -> Vec (S n) a
 
 --vlength :: Vec n a -> MyNat
 --vlength (_ :: Vec n a) = natTerm @n

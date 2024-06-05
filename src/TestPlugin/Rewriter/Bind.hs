@@ -5,16 +5,16 @@ module TestPlugin.Rewriter.Bind (rewriteBinds) where
 import Data.Foldable (forM_, Foldable (toList))
 
 import GHC.Plugins hiding (TcPlugin)
-import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef)
+import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef, TcLclEnv)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), isIdHsWrapper)
-import GHC (GhcTc, HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind)
+import GHC (GhcTc, HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds)
 import Data.Generics (everywhereM, mkM)
 import Control.Monad.State (modify, State, runState, MonadState (put, get))
 import GHC.Data.Bag (filterBagM)
 import TestPlugin.Placeholder (isPlaceholder)
 import GHC.Tc.Utils.TcType (mkTyCoVarTys, substTy)
 import Data.Maybe (mapMaybe)
-import GHC.Tc.Utils.Monad (newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef, wrapLocMA)
+import GHC.Tc.Utils.Monad (newTcRef, setGblEnv, getGblEnv, readTcRef, updTcRef, wrapLocMA, updGblEnv)
 import GHC.Tc.Utils.Env (tcExtendGlobalEnvImplicit)
 import GHC.Types.Unique.DFM (plusUDFM)
 import GHC.Core.TyCo.Rep (Type (..))
@@ -25,10 +25,9 @@ import GHC.Core.Unify (matchBindFun, tcUnifyTys)
 import GHC.Hs.Syn.Type (hsWrapperType)
 import Control.Monad (unless)
 
-rewriteBinds :: TcGblEnv -> (UpdateEnv -> TcGblEnv -> TcM TcGblEnv) -> TcM TcGblEnv
-rewriteBinds gbl cont = do
+rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
+rewriteBinds binds cont = do
   printLnTcM "rewriteBinds {"
-  let binds = tcg_binds gbl
   updateEnv <- newTcRef emptyDNameEnv
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds
   --printLnTcM "Starting second pass"
@@ -36,10 +35,9 @@ rewriteBinds gbl cont = do
   printLnTcM "Finished rewriteBinds pass, checking for remaining placeholders"
   binds'' <- everywhereM (mkM checkDoneLHsBind) binds'
   updates <- readTcRef updateEnv
-  setGblEnv gbl{tcg_binds = binds''} $ tcExtendGlobalEnvImplicit (map (AnId . new_id) $ toList updates) $ do
-    gbl' <- getGblEnv
+  updGblEnv (\gbl -> gbl{tcg_binds=binds''}) $ tcExtendGlobalEnvImplicit (map (AnId . new_id) $ toList updates) $ do
     printLnTcM "}"
-    cont updates gbl'
+    cont updates binds''
 
 rewriteLHsBind :: TcRef UpdateEnv -> LHsBind GhcTc -> TcM (LHsBind GhcTc)
 rewriteLHsBind ref = wrapLocMA (rewriteXHsBindsLR ref)
@@ -75,8 +73,12 @@ rewriteABExport updateEnv e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = d
 
 rewriteFunBind :: TcRef UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc GhcTc)
 rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick), fun_matches=MG{mg_ext=(MatchGroupTc args res _)} }) = do
-  outputTcM "rewriteFunBind " fid
+  dFlags <- getDynFlags
+  printLnTcM $ "starting rewriteFunBind " ++ (showSDoc dFlags $ ppr fid)
+  printLnTcM "old wrapper: "
   printWrapper 1 wrapper
+  printLnTcM "Inner Wrappers: "
+  _ <- everywhereM (mkM ((\w -> printWrapper 2 w >> return w))) b
   let old_ty = varType fid
   let wrapped = hsWrapperType wrapper $ mkScaledFunTys args res
   let old_vars = mapMaybe namedBinderVar $ fst $ splitInvisPiTys old_ty
@@ -89,7 +91,9 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
     (Just (wrapper', theta, last_tv), Just subst) -> do
       dFlags <- getDynFlags
       printLnTcM $ "rewriteFunBind " ++ (showSDoc dFlags $ ppr fid) ++ " {"
-      outputTcM "new wrapper: " ()
+      printLnTcM "old wrapper: "
+      printWrapper 1 wrapper
+      printLnTcM "new wrapper: "
       printWrapper 1 wrapper'
       let theta' = substTheta subst theta
       last_tv' <- case substTyVar subst last_tv of

@@ -7,6 +7,6 @@ import TestPlugin.Solver (totalTcPlugin)
 
 plugin :: Plugin
 plugin = defaultPlugin
-  {  typeCheckResultAction = totalTcResultAction
+  { typeCheckResultAction = totalTcResultAction
   , tcPlugin = totalTcPlugin
   }

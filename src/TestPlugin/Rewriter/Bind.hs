@@ -7,7 +7,7 @@ import Data.Foldable (forM_, Foldable (toList))
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef, TcLclEnv)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), isIdHsWrapper)
-import GHC (GhcTc, HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds)
+import GHC (GhcTc, HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds, LHsLocalBinds, GhcPass (GhcTc), HsLocalBinds, HsLocalBindsLR (HsIPBinds), IPBind (IPBind), HsIPBinds (IPBinds), LIPBind)
 import Data.Generics (everywhereM, mkM)
 import Control.Monad.State (modify, State, runState, MonadState (put, get))
 import GHC.Data.Bag (filterBagM)
@@ -34,11 +34,14 @@ rewriteBinds binds cont = do
   --printLnTcM "Starting second pass"
   --binds'' <- everywhereM (mkM (rewriteFunBind updateEnv)) binds'
   printLnTcM "Finished rewriteBinds pass, checking for remaining placeholders"
-  binds'' <- everywhereM (mkM checkDoneLHsBind) binds'
+  _ <- everywhereM (mkM checkDoneLHsBind) binds'
+  _ <- everywhereM (mkM checkDoneHsLocalBinds) binds'
+  _ <- everywhereM (mkM (checkDoneHsWrapper "Unknown wrapper:")) binds'
+  _ <- everywhereM (mkM (checkDoneTcEvBinds "Unknown TcEvBinds:")) binds'
   updates <- readTcRef updateEnv
-  updGblEnv (\gbl -> gbl{tcg_binds=binds''}) $ tcExtendGlobalEnvImplicit (map (AnId . new_id) $ toList updates) $ do
+  updGblEnv (\gbl -> gbl{tcg_binds=binds'}) $ tcExtendGlobalEnvImplicit (map (AnId . new_id) $ toList updates) $ do
     printLnTcM "}"
-    cont updates binds''
+    cont updates binds'
 
 rewriteLHsBind :: TcRef UpdateEnv -> LHsBind GhcTc -> TcM (LHsBind GhcTc)
 rewriteLHsBind ref = wrapLocMA (rewriteXHsBindsLR ref)
@@ -192,17 +195,23 @@ lastTyVar w = go w >>= \case
     go _ = return Nothing
 
 checkDoneLHsBind :: LHsBind GhcTc -> TcM (LHsBind GhcTc)
-checkDoneLHsBind = wrapLocMA checkDoneFunBind
+checkDoneLHsBind = wrapLocMA checkDoneHsBind
 
-checkDoneFunBind :: HsBind GhcTc -> TcM (HsBind GhcTc)
-checkDoneFunBind fb@(FunBind {fun_ext=(wrap, _)}) = checkDoneHsWrapper wrap >> return fb
-checkDoneFunBind b = return b
+checkDoneHsBind :: HsBind GhcTc -> TcM (HsBind GhcTc)
+checkDoneHsBind xb@(XHsBindsLR (AbsBinds{abs_ev_binds=ev_binds})) = forM_ ev_binds (checkDoneTcEvBinds "AbsBinds:") >> return xb
+checkDoneHsBind fb@(FunBind {fun_ext=(wrap, _)}) = checkDoneHsWrapper "FunBind wrapper:" wrap >> return fb
+checkDoneHsBind b = return b
 
-checkDoneHsWrapper :: HsWrapper -> TcM HsWrapper
-checkDoneHsWrapper w@(WpLet (EvBinds binds))
-  | any (isPlaceholder . eb_rhs) binds = do 
-    outputTcM "Placeholders remaining in wrapper: " ()
-    printWrapper 1 w
-    failTcM $ text "Found placeholder after rewrites"
-  | otherwise = return w
-checkDoneHsWrapper w = return w
+checkDoneHsWrapper :: String -> HsWrapper -> TcM HsWrapper
+checkDoneHsWrapper str (WpLet ev_binds) = WpLet <$> checkDoneTcEvBinds str ev_binds
+checkDoneHsWrapper _ w = return w
+
+checkDoneHsLocalBinds :: HsLocalBinds GhcTc -> TcM (HsLocalBinds GhcTc)
+checkDoneHsLocalBinds lbs@(HsIPBinds _ (IPBinds ev_binds _)) = checkDoneTcEvBinds "HsIPBinds" ev_binds >> return lbs
+checkDoneHsLocalBinds lbs = return lbs
+
+checkDoneTcEvBinds :: String -> TcEvBinds -> TcM TcEvBinds
+checkDoneTcEvBinds str (EvBinds binds)
+  | any (isPlaceholder . eb_rhs) binds = failTcM $ text str <+> text "Found placeholder after rewrites: " <+> ppr binds
+checkDoneTcEvBinds str (TcEvBinds _) = failTcM $ text str <+> text "Encountered unzonked TcEvBinds, this should not happen"
+checkDoneTcEvBinds _ ev_binds = return ev_binds

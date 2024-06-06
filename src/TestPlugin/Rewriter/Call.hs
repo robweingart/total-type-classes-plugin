@@ -27,6 +27,7 @@ import GHC.Tc.Solver.Monad (runTcS)
 import GHC.Tc.Solver (solveWanteds)
 import GHC.Tc.Types.Constraint (isSolvedWC)
 import GHC.Stack (emptyCallStack)
+import Data.Maybe (isJust)
 
 rewriteCalls :: UpdateEnv -> LHsBinds GhcTc -> (LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteCalls ids binds cont
@@ -176,8 +177,11 @@ rewriteWrapExpr updates outer@(XExpr (WrapExpr (HsWrap _ _))) = do
         return (new_ev_apps, new_inner, maybe_update')
       let new_wrap = new_ev_apps <.> wrap'
       let new_expr = XExpr (WrapExpr (HsWrap new_wrap new_inner))
-      unless (hsExprType expr `eqType` hsExprType new_expr) $
-        failTcM $ text "Type still different after update"
+      unless (isJust maybe_update || hsExprType expr `eqType` hsExprType new_expr) $
+        failTcM $ text "Type still different after update:" <+> (vcat $
+          [ text "old:" <+> ppr (hsExprType expr)
+          , text "new:" <+> ppr (hsExprType new_expr)
+          ])
       return (new_expr, maybe_update)
     go expr@(HsVar x (L l var))
       | Just update <- lookupDNameEnv updates $ varName var = do

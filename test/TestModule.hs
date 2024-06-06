@@ -34,8 +34,8 @@ f x = isTrue x
 --f2 :: forall (a :: Bool). Proxy a -> Bool
 --f2 x = isTrue x && isTrue x
 --
---fWeird :: forall (a :: Bool). MyTotalClass a => forall (b :: Bool). Proxy a -> Proxy b -> Bool
---fWeird x y = isTrue x && isTrue y
+fWeird :: forall (a :: Bool). MyTotalClass a => forall (b :: Bool). Proxy a -> Proxy b -> Bool
+fWeird x y = isTrue x && isTrue y
 --
 showF :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
 showF x = show $ f x
@@ -68,8 +68,8 @@ showF' (x :: Proxy b) = show $ (f :: MyTotalClass b => Proxy b -> Bool) x
 --showF :: forall (a :: Bool). Proxy a -> String
 --showF x = show $ f x
 --
---showFWeird :: forall (a :: Bool) (b :: Bool). Proxy a -> Proxy b -> String
---showFWeird x y = show $ fWeird x y
+showFWeird :: forall (a :: Bool) (b :: Bool). Proxy a -> Proxy b -> String
+showFWeird x y = show $ fWeird x y
 --
 --showFF :: forall (a :: Bool). Proxy a -> String
 --showFF x = show (f x) ++ show (f x) 

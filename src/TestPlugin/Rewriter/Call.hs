@@ -7,10 +7,10 @@ module TestPlugin.Rewriter.Call (rewriteCalls) where
 import GHC.Plugins hiding (TcPlugin)
 import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn, LHsBind, LHsExpr, LHsBinds)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcLclEnv)
-import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, isEmptyEvBindMap, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar), mkWpLet)
+import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar), mkWpLet, EvBindMap (EvBindMap), extendEvBinds)
 import Data.Generics (everywhereM, mkM, mkQ, GenericM, GenericQ, Data (gmapM), GenericQ' (unGQ, GQ))
 import GHC.Hs.Syn.Type (hsExprType)
-import GHC.Tc.Utils.Monad (captureConstraints, newTcRef, readTcRef, updTcRef, writeTcRef, wrapLocMA, getEnvs, updGblEnv, restoreEnvs, setGblEnv)
+import GHC.Tc.Utils.Monad (readTcRef, updTcRef, writeTcRef, wrapLocMA, getEnvs, restoreEnvs, setGblEnv)
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
 import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf), SkolemInfoAnon (UnkSkol))
 
@@ -39,55 +39,20 @@ rewriteCalls ids binds cont
     (gbl, lcl) <- getEnvs
     new_ev_binds <- restoreEnvs (gbl, lcl) $ simplifyTop lie
     unless (isEmptyBag new_ev_binds) $ failTcM $ text "rewriter produced global constraints"
-    binds'' <- mergeAllWpLets binds'
+    binds'' <- rezonkAllWpLets binds'
     setGblEnv gbl{tcg_binds=binds''} $ do
       cont binds''
 
-mergeAllWpLets :: GenericM TcM
-mergeAllWpLets = go
+rezonkAllWpLets :: GenericM TcM
+rezonkAllWpLets = go
   where
     go :: GenericM TcM
-    go x = if (mkQ False (const True :: HsWrapper -> Bool)) x then (mkM mergeWpLet) x else gmapM go x
+    go x = if (mkQ False (const True :: HsWrapper -> Bool)) x then (mkM rezonkWpLet) x else gmapM go x
 
--- Precondition: The wrapper is ((((w <.> WpLet) ...) <.> WpLet) <.> WpLet)
--- where w is (w1 <.> (w2 <.> (... (wn <.> WpLet))))
--- and none of the w1, ... wn contain any WpLet
--- Returns (w1 <.> (w2 <.> (... (wn <.> WpLet (EvBinds ebs)))))
--- where ebs contains the binds of all the WpLet in the input. 
-mergeWpLet :: HsWrapper -> TcM HsWrapper
-mergeWpLet wrap = withTcRef (Just 0 :: Maybe Int) (\ref -> everywhereM (mkM (count_let ref)) wrap) >>= \case
-  (Just 0, _) -> return wrap
-  (Just 1, _) -> return wrap
-  _ -> do
-    wrap' <- go wrap
-    withTcRef (Just 0 :: Maybe Int) (\ref -> everywhereM (mkM (count_let ref)) wrap') >>= \case
-      (Just 0, _) -> return wrap'
-      (Just 1, _) -> do
-        printLnTcM "mergeWpLet turned" 
-        printWrapper 1 wrap
-        printLnTcM "into"
-        printWrapper 1 wrap'
-        return wrap'
-      (Just _, _) -> failTcM $ text "Encountered multiple WpLet after merging"
-      (Nothing, _) -> failTcM $ text "Encountered EvBindsVar after merging"
-  where
-    go (WpCompose (WpCompose w (WpLet ev1)) (WpLet ev2)) = do
-      w' <- mergeTcEvBinds ev1 ev2
-      go (w <.> w') 
-    go (WpCompose (WpCompose w1 w2) (WpLet ev)) = do
-      wp_let' <- (mkWpLet . EvBinds) <$> rezonkTcEvBinds ev
-      go (w1 <.> (w2 <.> wp_let'))
-    go (WpCompose (WpLet ev1) (WpLet ev2)) = mergeTcEvBinds ev1 ev2
-    go (WpCompose w1 w2) = (w1 <.>) <$> go w2
-    go (WpLet ev) = (mkWpLet . EvBinds) <$> rezonkTcEvBinds ev
-    go w = return w
-
-    count_let ref w@(WpLet (TcEvBinds _)) = writeTcRef ref Nothing >> return w
-    count_let ref w@(WpLet (EvBinds _)) = updTcRef ref (fmap (+1)) >> return w
-    count_let _ w = return w
-
-mergeTcEvBinds :: TcEvBinds -> TcEvBinds -> TcM HsWrapper
-mergeTcEvBinds x y = (mkWpLet . EvBinds) <$> liftA2 unionBags (rezonkTcEvBinds x) (rezonkTcEvBinds y)
+rezonkWpLet :: HsWrapper -> TcM HsWrapper
+rezonkWpLet (WpCompose w1 w2) = liftA2 (<.>) (rezonkWpLet w1) (rezonkWpLet w2)
+rezonkWpLet (WpLet ev_binds) = (mkWpLet . EvBinds) <$> rezonkTcEvBinds ev_binds
+rezonkWpLet w = return w
 
 rezonkTcEvBinds :: TcEvBinds -> TcM (Bag EvBind)
 rezonkTcEvBinds (TcEvBinds (CoEvBindsVar{})) = return emptyBag
@@ -118,11 +83,32 @@ reskolemise wrap thing_inside = wrapperLams wrap >>= \case
     (new_ev_binds, result) <- 
       checkConstraints (UnkSkol emptyCallStack) tvs given $
       tcExtendNameTyVarEnv (mkTyVarNamePairs tvs) thing_inside
-    let new_wrap = wrap <.> mkWpLet new_ev_binds
+    new_wrap <- addToWpLet new_ev_binds wrap
     outputTcM "} New ev binds:" new_ev_binds
     printLnTcM "New wrapper:"
     printWrapper 1 new_wrap
     return (new_wrap, result)
+
+addToWpLet :: TcEvBinds -> HsWrapper -> TcM HsWrapper 
+addToWpLet new_ev_binds wrap = do
+  withTcRef (0 :: Int) (go wrap) >>= \case
+    (0, wrap') -> return $ wrap' <.> mkWpLet new_ev_binds
+    (1, wrap') -> return wrap'
+    _ -> failTcM $ text "Too many WpLet"
+  where
+    go WpHole _ = return WpHole
+    go (WpCompose w1 w2) counter = liftA2 (<.>) (go w1 counter) (go w2 counter)
+    go (WpFun _ _ _) _ = failTcM $ text "unexpected WpFun"
+    go (WpLet (EvBinds binds)) counter = do
+      updTcRef counter (+1) :: TcM ()
+      mkWpLet <$> case new_ev_binds of
+        TcEvBinds (EvBindsVar{ebv_binds=binds_ref}) -> do
+          updTcRef binds_ref (\ebm -> foldr (flip extendEvBinds) ebm binds)
+          return new_ev_binds
+        TcEvBinds (CoEvBindsVar{}) -> failTcM $ text "Added CoEvBindsVar to wrapper with existing WpLet"
+        EvBinds new_binds -> return $ EvBinds (new_binds `unionBags` binds)
+    go (WpLet (TcEvBinds _)) _ = failTcM $ text "Encountered unzonked TcEvBinds, this should not happen"
+    go w _ = return w
 
 wrapperLams :: HsWrapper -> TcM ([TyVar], [EvVar])
 wrapperLams w = go w ([], [])

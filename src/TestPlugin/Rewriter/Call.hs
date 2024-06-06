@@ -10,7 +10,7 @@ import GHC.Tc.Types (TcM, TcGblEnv (..), TcLclEnv)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind, TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar), mkWpLet, EvBindMap (EvBindMap), extendEvBinds)
 import Data.Generics (everywhereM, mkM, mkQ, GenericM, GenericQ, Data (gmapM), GenericQ' (unGQ, GQ))
 import GHC.Hs.Syn.Type (hsExprType)
-import GHC.Tc.Utils.Monad (readTcRef, updTcRef, writeTcRef, wrapLocMA, getEnvs, restoreEnvs, setGblEnv)
+import GHC.Tc.Utils.Monad (readTcRef, updTcRef, writeTcRef, wrapLocMA, getEnvs, restoreEnvs, setGblEnv, addTopEvBinds)
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
 import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf), SkolemInfoAnon (UnkSkol))
 
@@ -31,16 +31,17 @@ rewriteCalls :: UpdateEnv -> LHsBinds GhcTc -> (LHsBinds GhcTc -> TcM (TcGblEnv,
 rewriteCalls ids binds cont
   | isEmptyDNameEnv ids = do
     printLnTcM "No new modified ids, ending loop"
-    --outputFullTcM "Full: " binds
+    outputFullTcM "Full at end: " binds
     getEnvs
   | otherwise = do
+    outputFullTcM "Full before rewriteCalls: " binds
     forM_ ids (outputTcM "")
     (binds', lie) <- captureTopConstraints $ everywhereM (mkM (rewriteCallsInLHsBind ids)) binds
     (gbl, lcl) <- getEnvs
     new_ev_binds <- restoreEnvs (gbl, lcl) $ simplifyTop lie
-    unless (isEmptyBag new_ev_binds) $ failTcM $ text "rewriter produced global constraints"
+    --unless (isEmptyBag new_ev_binds) $ failTcM $ text "rewriter produced global constraints" <+> ppr new_ev_binds
     binds'' <- rezonkAllWpLets binds'
-    setGblEnv gbl{tcg_binds=binds''} $ do
+    setGblEnv gbl{tcg_binds=binds''} $ addTopEvBinds new_ev_binds $ do
       cont binds''
 
 rezonkAllWpLets :: GenericM TcM

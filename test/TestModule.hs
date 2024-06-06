@@ -7,106 +7,185 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-module TestModule where
+module TestModule (testExposed, testExposedCall, testAll) where
 
 import Data.Proxy
 import TestPlugin
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
-class MyClass a where
-
-instance MyClass a => MyClass [a]
-
-class MyTotalClass (a :: Bool) where
-  isTrue :: Proxy a -> Bool
-
-instance MyTotalClass True where
-  isTrue _ = True
-
-instance MyTotalClass False where
-  isTrue _ = False
-
-instance TotalClass MyTotalClass where
+instance TotalClass KnownSymbol where
   totalityEvidence = assertTotality
---
-f :: forall (a :: Bool). Proxy a -> Bool
-f x = isTrue x
 
---f2 :: forall (a :: Bool). Proxy a -> Bool
---f2 x = isTrue x && isTrue x
---
-fWeird :: forall (a :: Bool). MyTotalClass a => forall (b :: Bool). Proxy a -> Proxy b -> Bool
-fWeird x y = isTrue x && isTrue y
---
-showF :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
-showF x = show $ f x
+-- Function requiring rewrite
+testSimple :: forall (s :: Symbol). Proxy s -> String
+testSimple x = symbolVal x
 
---inner :: forall (c :: Type). MyClass [c] => ()
---inner = ()
---
---innerWpLet :: forall (a :: Type). MyClass a => Proxy a -> ()
---innerWpLet (_ :: Proxy b) = (inner @b :: MyClass b => ())
+-- Function requiring rewrite
+testExposed :: forall (s :: Symbol). Proxy s -> String
+testExposed x = symbolVal x
 
-showF' :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
-showF' (x :: Proxy b) = show $ (f :: MyTotalClass b => Proxy b -> Bool) x
+-- Call to rewritten function, caller already has constraint
+testExposedCall :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
+testExposedCall x = testSimple x
 
---showFCast :: forall (a :: Bool). MyTotalClass a => Proxy a -> String
---showFCast x = show $ (f :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool) x
+-- Call to rewritten function, caller will also need rewrite
+testTransExposedCall :: forall (s :: Symbol). Proxy s -> String 
+testTransExposedCall x = testSimple x
 
---fEta  :: forall (a :: Bool). Proxy a -> Bool
---fEta = f
---
---
---f' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
---f' x = isTrue x
---
---f2' :: forall (a :: Bool). MyTotalClass a => Proxy a -> Bool
---f2' x = isTrue x && isTrue x
---
---fMono ::  Bool
---fMono = isTrue (Proxy :: Proxy True)
---
---showF :: forall (a :: Bool). Proxy a -> String
---showF x = show $ f x
---
-showFWeird :: forall (a :: Bool) (b :: Bool). Proxy a -> Proxy b -> String
-showFWeird x y = show $ fWeird x y
---
---showFF :: forall (a :: Bool). Proxy a -> String
---showFF x = show (f x) ++ show (f x) 
---
---showF2 :: forall (a :: Bool). Proxy a -> String
---showF2 x = show $ fAnd x
---  where 
---    fAnd :: forall (b :: Bool). Proxy b -> Bool
---    fAnd y = isTrue y && isTrue y
+-- Call to rewritten function, caller already has constraint
+testCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
+testCall1 x = testSimple x
 
---showFAnd :: forall (a :: Bool). Proxy a -> String
---showFAnd x = show $ fAnd x
---  where 
---    --fAnd :: forall (b :: Bool). Proxy b -> Bool
---    fAnd y = f y && f y
---
---showFMono :: String
---showFMono = show $ f (Proxy :: Proxy True)
+-- Call to rewritten function, caller will also need rewrite
+testCall2 :: forall (s :: Symbol). Proxy s -> String 
+testCall2 x = testSimple x
 
+-- Multiple uses of the same missing constraint
+testSimples :: forall (s :: Symbol). Proxy s -> String 
+testSimples x = symbolVal x ++ " " ++ symbolVal x
 
---data MyNat = Z | S MyNat deriving Show
---
---class IsNat (n :: MyNat) where
---  natTerm :: MyNat
---
---instance IsNat Z where
---  natTerm = Z
---
---instance IsNat n => IsNat (S n) where
---  natTerm = S (natTerm @n)
---
---instance TotalClass IsNat where
---  totalityEvidence = assertTotality
---
---data Vec (n :: MyNat) a where
---  VNil :: Vec Z a
---  VCons :: a -> Vec n a -> Vec (S n) a
+-- Two different missing constraints
+testSimples' :: forall (s1 :: Symbol) (s2 :: Symbol). Proxy s1 -> Proxy s2 -> String 
+testSimples' x y = symbolVal x ++ " " ++ symbolVal y
 
---vlength :: Vec n a -> MyNat
---vlength (_ :: Vec n a) = natTerm @n
+-- Multiple calls with same provided constraint
+testCalls1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
+testCalls1 x = testSimple x ++ " " ++ testSimple x
+
+-- Multiple calls with different provided constraints
+testCalls1' :: forall (s1 :: Symbol) (s2 :: Symbol). (KnownSymbol s1, KnownSymbol s2) => Proxy s1 -> Proxy s2 -> String 
+testCalls1' x y = testSimple x ++ " " ++ testSimple y
+
+testTransCalls1 :: forall (s :: Symbol). Proxy s -> String 
+testTransCalls1 x = testSimple x ++ " " ++ testSimple x
+
+-- Multiple calls with different missing constraints
+testTransCalls1' :: forall (s1 :: Symbol) (s2 :: Symbol). Proxy s1 -> Proxy s2 -> String 
+testTransCalls1' x y = testSimple x ++ " " ++ testSimple y
+
+-- One constraint already provided, but in a weird place
+testWeirdOrderSimples :: forall (s1 :: Symbol). KnownSymbol s1 => forall (s2 :: Symbol). Proxy s1 -> Proxy s2 -> String
+testWeirdOrderSimples x y = symbolVal x ++ " " ++ symbolVal y
+
+-- Both constraints provided, but in a weird order
+testWeirdOrderCalls1 :: forall (s1 :: Symbol). KnownSymbol s1 => forall (s2 :: Symbol). KnownSymbol s2 => Proxy s1 -> Proxy s2 -> String
+testWeirdOrderCalls1 x y = testSimple x ++ " " ++ testSimple y
+
+-- One constraint already provided, but in a weird place
+testWeirdOrderCalls2 :: forall (s1 :: Symbol). KnownSymbol s1 => forall (s2 :: Symbol). Proxy s1 -> Proxy s2 -> String
+testWeirdOrderCalls2 x y = testSimple x ++ " " ++ testSimple y
+
+-- Calling a function with weith binder order
+testWeirdOrderCalls3 :: forall (s1 :: Symbol). forall (s2 :: Symbol). Proxy s1 -> Proxy s2 -> String
+testWeirdOrderCalls3 x y = testWeirdOrderCalls2 x y
+--
+-- Cast the called function to its rewritten type
+testPolyCastCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testPolyCastCall1 x = (testSimple :: forall (s' :: Symbol). KnownSymbol s' => Proxy s' -> String) x
+
+-- Cast the called function to its rewritten type
+testPolyCastCall2 :: forall (s :: Symbol). Proxy s -> String
+testPolyCastCall2 x = (testSimple :: forall (s' :: Symbol). KnownSymbol s' => Proxy s' -> String) x
+
+-- Cast the called function to its rewritten type with a known type param
+testMonoCastCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testMonoCastCall1 (x :: Proxy s) = (testSimple :: KnownSymbol s => Proxy s -> String) x
+
+-- Cast the called function to its rewritten type with a known type param
+testMonoCastCall2 :: forall (s :: Symbol). Proxy s -> String
+testMonoCastCall2 (x :: Proxy s) = (testSimple :: KnownSymbol s => Proxy s -> String) x
+
+testEtaSimple :: forall (s :: Symbol). Proxy s -> String
+testEtaSimple = symbolVal
+
+testEtaCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testEtaCall1 = testSimple
+
+testEtaCall2 :: forall (s :: Symbol). Proxy s -> String
+testEtaCall2 = testSimple
+
+testNestedPolySimple :: forall (s :: Symbol). Proxy s -> String
+testNestedPolySimple x = goPolySimple x
+  where
+    goPolySimple  :: forall (s' :: Symbol). Proxy s' -> String
+    goPolySimple  x' = symbolVal x'
+
+testNestedMonoSimple :: forall (s :: Symbol). Proxy s -> String
+testNestedMonoSimple x = goMonoSimple x
+  where
+    goMonoSimple :: Proxy s -> String
+    goMonoSimple x' = symbolVal x'
+
+testNestedInferredSimple :: forall (s :: Symbol). Proxy s -> String
+testNestedInferredSimple x = goInferredSimple  x
+  where
+    goInferredSimple x' = symbolVal x'
+
+testNestedPolyCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testNestedPolyCall1 x = goPolyCall1  x
+  where
+    goPolyCall1  :: forall (s' :: Symbol). KnownSymbol s' => Proxy s' -> String
+    goPolyCall1  x' = testSimple x'
+
+testNestedPolyCall2 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testNestedPolyCall2 x = goPolyCall2  x
+  where
+    goPolyCall2  :: forall (s' :: Symbol). Proxy s' -> String
+    goPolyCall2  x' = testSimple x'
+
+testNestedPolyCall3 :: forall (s :: Symbol). Proxy s -> String
+testNestedPolyCall3 x = goPolyCall3  x
+  where
+    goPolyCall3  :: forall (s' :: Symbol). Proxy s' -> String
+    goPolyCall3  x' = testSimple x'
+
+testNestedMonoCall :: forall (s :: Symbol). Proxy s -> String
+testNestedMonoCall x = goMonoCall  x
+  where
+    goMonoCall  :: Proxy s -> String
+    goMonoCall  x' = testSimple x'
+
+testNestedInferredCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testNestedInferredCall1 x = goInferredCall1  x
+  where
+    goInferredCall1  x' = testSimple x'
+
+testNestedInferredCall2 :: forall (s :: Symbol). Proxy s -> String
+testNestedInferredCall2 x = goInferredCall2  x
+  where
+    goInferredCall2  x' = testSimple x'
+
+testAll :: IO ()
+testAll = do
+  putStrLn $ testSimple (Proxy :: Proxy "testSimple")
+  putStrLn $ testExposed (Proxy :: Proxy "testExposed")
+  putStrLn $ testExposedCall (Proxy :: Proxy "testExposedCall") 
+  putStrLn $ testTransExposedCall (Proxy :: Proxy "testTransExposedCall") 
+  putStrLn $ testCall1 (Proxy :: Proxy "testCall1") 
+  putStrLn $ testCall2 (Proxy :: Proxy "testCall2") 
+  putStrLn $ testSimples (Proxy :: Proxy "testSimples") 
+  putStrLn $ testSimples' (Proxy :: Proxy "testSimples' arg 1,") (Proxy :: Proxy "testSimples' arg 2") 
+  putStrLn $ testCalls1 (Proxy :: Proxy "testCalls1") 
+  putStrLn $ testCalls1' (Proxy :: Proxy "testCalls1' arg 1,") (Proxy :: Proxy "testCalls1' arg 2") 
+  putStrLn $ testTransCalls1 (Proxy :: Proxy "testTransCalls1") 
+  putStrLn $ testTransCalls1' (Proxy :: Proxy "testTransCalls1' arg 1,") (Proxy :: Proxy "testTransCalls1' arg 2") 
+  putStrLn $ testWeirdOrderSimples (Proxy :: Proxy "testWeirdOrderSimples arg 1,") (Proxy :: Proxy "testWeirdOrderSimples arg 2")
+  putStrLn $ testWeirdOrderCalls1 (Proxy :: Proxy "testWeirdOrderCalls1 arg 1,") (Proxy :: Proxy "testWeirdOrderCalls1 arg 2")
+  putStrLn $ testWeirdOrderCalls2 (Proxy :: Proxy "testWeirdOrderCalls2 arg 1,") (Proxy :: Proxy "testWeirdOrderCalls2 arg 2")
+  putStrLn $ testWeirdOrderCalls3 (Proxy :: Proxy "testWeirdOrderCalls3 arg 1,") (Proxy :: Proxy "testWeirdOrderCalls3 arg 2")
+  putStrLn $ testPolyCastCall1 (Proxy :: Proxy "testPolyCastCall1")
+  putStrLn $ testPolyCastCall2 (Proxy :: Proxy "testPolyCastCall2")
+  putStrLn $ testMonoCastCall1 (Proxy :: Proxy "testMonoCastCall1")
+  putStrLn $ testMonoCastCall2 (Proxy :: Proxy "testMonoCastCall2")
+  putStrLn $ testEtaSimple (Proxy :: Proxy "testEtaSimple")
+  putStrLn $ testEtaCall1 (Proxy :: Proxy "testEtaCall1")
+  putStrLn $ testEtaCall2 (Proxy :: Proxy "testEtaCall2")
+  putStrLn $ testNestedPolySimple (Proxy :: Proxy "testNestedPolySimple")
+  putStrLn $ testNestedMonoSimple (Proxy :: Proxy "testNestedMonoSimple")
+  --putStrLn $ testNestedInferredSimple (Proxy :: Proxy "testNestedInferredSimple")
+  putStrLn $ testNestedPolyCall1 (Proxy :: Proxy "testNestedPolyCall1")
+  putStrLn $ testNestedPolyCall2 (Proxy :: Proxy "testNestedPolyCall2")
+  putStrLn $ testNestedPolyCall3 (Proxy :: Proxy "testNestedPolyCall3")
+  --putStrLn $ testNestedMonoCall (Proxy :: Proxy "testNestedMonoCall")
+  --putStrLn $ testNestedInferredCall1 (Proxy :: Proxy "testNestedInferredCall1")
+  --putStrLn $ testNestedInferredCall2 (Proxy :: Proxy "testNestedInferredCall2")

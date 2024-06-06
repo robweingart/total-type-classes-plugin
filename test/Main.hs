@@ -10,24 +10,6 @@ import TestModule
 
 main :: IO ()
 main = do
-  --print $ f (Proxy :: Proxy True)
-  --print $ fMono
-  print $ showF (Proxy :: Proxy True)
-  print $ showF' (Proxy :: Proxy True)
-  print $ showFWeird (Proxy :: Proxy True) (Proxy :: Proxy False)
-  --print $ showF2 (Proxy :: Proxy True)
-  --print $ showFAnd (Proxy :: Proxy True)
-  --print $ showFMono
-  --print $ vlength $ VCons "hello" $ VCons "world" VNil
-  putStrLn "Test suite not yet implemented."
-
--- f1 :: a -> m a
--- f1 x = return x
--- 
--- f2 :: a -> a -> a
--- f2 = (+)
-
---test :: forall k (c :: k -> Constraint). TotalClass c => String
---test = show $ totalityEvidence @k @c
---
---test2 = test @Bool @MyTotalClass
+  putStrLn $ testExposed (Proxy :: Proxy "testExposed")
+  putStrLn $ testExposedCall (Proxy :: Proxy "testExposedCall")
+  testAll

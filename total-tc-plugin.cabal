@@ -68,7 +68,7 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>= 4.19.1.0, ghc ^>= 9.8.2, syb, mtl, bytestring, containers
+    build-depends:    base ^>= 4.19.1.0, ghc ^>= 9.8.2, syb, mtl, bytestring, containers, singletons, singletons-th, singletons-base, constraints
 
 
     -- Directories containing source files.
@@ -85,7 +85,7 @@ test-suite total-tc-plugin-test
     default-language: Haskell2010
 
     -- Modules included in this executable, other than Main.
-    other-modules: TestModule
+    other-modules: TestModule,Checking
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -102,4 +102,8 @@ test-suite total-tc-plugin-test
     -- Test dependencies.
     build-depends:
         base,
-        total-tc-plugin
+        total-tc-plugin,
+        singletons,
+        singletons-base,
+        singletons-th,
+        constraints

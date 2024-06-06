@@ -156,7 +156,7 @@ rewriteHsWrapper wrapper = do
     [newArgTys] -> do
       tv <- lastTyVar wrapper
       return $ Just (wrapper', newArgTys, tv) 
-    _ -> failTcM $ text "encountered multiple WpLet, this should not happen"
+    _ -> failTcM $ text "encountered multiple zonked WpLet, this should not happen"
   --printLnTcM "}"
   return res
 

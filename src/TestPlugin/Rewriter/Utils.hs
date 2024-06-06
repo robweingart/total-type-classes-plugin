@@ -1,21 +1,28 @@
 {-# LANGUAGE LambdaCase #-}
 
-module TestPlugin.Rewriter.Utils (printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, hsWrapperTypeSubst) where
+module TestPlugin.Rewriter.Utils (withTcRef, printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, hsWrapperTypeSubst) where
 
 import Data.Foldable (forM_)
 
 import GHC.Plugins
-import GHC.Tc.Types (TcM)
-import GHC.Tc.Types.Evidence (HsWrapper (..), EvBind(EvBind), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr))
+import GHC.Tc.Types (TcM, TcRef)
+import GHC.Tc.Types.Evidence (HsWrapper (..), EvBind(EvBind), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr), EvBindsVar (ebv_tcvs, ebv_binds, CoEvBindsVar, EvBindsVar), evBindMapBinds)
 import GHC.Core.TyCo.Rep (Type(..), Scaled (Scaled))
 import GHC.Core.TyCo.Subst (substTy)
 import GHC.Hs.Dump (showAstData, BlankSrcSpan (BlankSrcSpan), BlankEpAnnotations (BlankEpAnnotations))
-import GHC.Tc.Utils.Monad (failWith)
+import GHC.Tc.Utils.Monad (failWith, newTcRef, readTcRef)
 import GHC.Tc.Errors.Types (TcRnMessage(TcRnUnknownMessage))
 import GHC.Utils.Error (mkPlainError)
 import GHC.Types.Error (mkSimpleUnknownDiagnostic)
 import Data.Data (Data)
+import GHC.Data.Bag (Bag)
 
+withTcRef :: a -> (TcRef a -> TcM r) -> TcM (a, r)
+withTcRef initial f = do
+  ref <- newTcRef initial
+  result <- f ref
+  final <- readTcRef ref
+  return (final, result)
 
 printBndrTys :: Type -> TcM ()
 printBndrTys ty = do
@@ -80,19 +87,28 @@ printWrapper n w@(WpTyApp t) = do
   case t of
     TyVarTy var -> output' (n+1) "var: " $ varUnique var
     _ -> return ()
-printWrapper n w@(WpLet evbinds) = do 
+printWrapper n w@(WpLet ev_binds) = do 
   output' n "WpLet" w
-  output' (n+1) "TcEvBinds: " ()
-  case evbinds of
-    TcEvBinds _ -> return ()
-    EvBinds binds -> forM_ binds $ \(EvBind lhs rhs _) -> do
-      output' (n+2) "LHS: " lhs
-      output' (n+3) "type: " $ varType lhs
-      case varType lhs of
-        TyConApp _ [TyVarTy var] -> output' (n+3) "var: " $ varUnique var
-        _ -> return ()
-      output' (n+3) "RHS: " rhs
+  case ev_binds of
+    TcEvBinds (CoEvBindsVar{ebv_tcvs=tcvs}) -> readTcRef tcvs >>= output' (n+1) "TcEvBinds CoEvBindsVar: "
+    TcEvBinds (EvBindsVar{ebv_binds=binds}) -> do
+      output' (n+1) "TcEvBinds EvBindsVar: " ()
+      ebs <- readTcRef binds
+      printEvBinds (n+2) $ evBindMapBinds  ebs
+    EvBinds ebm -> do
+      output' (n+1) "EvBinds: " ()
+      printEvBinds (n+2) ebm
 printWrapper n w@(WpMultCoercion _) = output' n "WpMultCoercion" w
+
+printEvBinds :: Int -> (Bag EvBind) -> TcM ()
+printEvBinds n binds = do
+  forM_ binds $ \(EvBind lhs rhs _) -> do
+    output' (n+2) "LHS: " lhs
+    output' (n+3) "type: " $ varType lhs
+    case varType lhs of
+      TyConApp _ [TyVarTy var] -> output' (n+3) "var: " $ varUnique var
+      _ -> return ()
+    output' (n+3) "RHS: " rhs
 
 piResultTysSubst :: HasDebugCallStack => Type -> [Type] -> (Type, Subst)
 piResultTysSubst ty [] = (ty, mkEmptySubst $ mkInScopeSet emptyVarSet)

@@ -13,3 +13,4 @@ main = do
   putStrLn $ testExposed (Proxy :: Proxy "testExposed")
   putStrLn $ testExposedCall (Proxy :: Proxy "testExposedCall")
   testAll
+  return ()

@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module TestPlugin.Rewriter.Utils (withTcRef, printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, hsWrapperTypeSubst) where
+module TestPlugin.Rewriter.Utils (withTcRef, printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, hsWrapperTypeSubst, orElseM, mkMMaybe, orReturn) where
 
 import Data.Foldable (forM_)
 
@@ -14,8 +14,10 @@ import GHC.Tc.Utils.Monad (failWith, newTcRef, readTcRef)
 import GHC.Tc.Errors.Types (TcRnMessage(TcRnUnknownMessage))
 import GHC.Utils.Error (mkPlainError)
 import GHC.Types.Error (mkSimpleUnknownDiagnostic)
-import Data.Data (Data)
+import Data.Data (Data, Typeable)
 import GHC.Data.Bag (Bag)
+import Data.Functor.Compose (Compose(Compose, getCompose))
+import Data.Generics (ext0)
 
 withTcRef :: a -> (TcRef a -> TcM r) -> TcM (a, r)
 withTcRef initial f = do
@@ -188,3 +190,20 @@ hsWrapperTypeSubst wrap ty = prTypeType $ go wrap (ty, [], empty_subst)
     go (WpTyApp ta)    = \(ty',tas, subst) -> (ty', ta:tas, subst)
     go (WpLet _)       = id
     go (WpMultCoercion _)  = id
+
+extM' :: (Typeable a, Typeable b) => (a -> m a) -> (b -> m b) -> a -> m a
+extM' def ext = unM' ((M' def) `ext0` (M' ext))
+
+orElseM :: Monad m => m (Maybe a) -> m a -> m a
+orElseM f g = f >>= \case
+  Just x' -> return x'
+  Nothing -> g
+
+
+mkMMaybe :: (Monad m, Typeable a, Typeable b) => (b -> m (Maybe b)) -> a -> m (Maybe a)
+mkMMaybe f = getCompose . extM' (\_ -> Compose (return Nothing)) (Compose . f)
+
+orReturn :: Monad m => (a -> m (Maybe a)) -> a -> m a
+orReturn f x = orElseM (f x) (return x)
+
+newtype M' m x = M' { unM' :: x -> m x }

@@ -7,7 +7,9 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-module TestModule (testExposed, testExposedCall, testAll) where
+module TestModule 
+  (testExposed, testExposedCall, testAll)
+where
 
 import Data.Proxy
 import TestPlugin
@@ -116,6 +118,11 @@ testNestedMonoSimple x = goMonoSimple x
     goMonoSimple :: Proxy s -> String
     goMonoSimple x' = symbolVal x'
 
+testNested' :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testNested' x = go'  x
+  where
+    go' x' = symbolVal x'
+
 testNestedInferredSimple :: forall (s :: Symbol). Proxy s -> String
 testNestedInferredSimple x = goInferredSimple  x
   where
@@ -182,10 +189,10 @@ testAll = do
   putStrLn $ testEtaCall2 (Proxy :: Proxy "testEtaCall2")
   putStrLn $ testNestedPolySimple (Proxy :: Proxy "testNestedPolySimple")
   putStrLn $ testNestedMonoSimple (Proxy :: Proxy "testNestedMonoSimple")
-  --putStrLn $ testNestedInferredSimple (Proxy :: Proxy "testNestedInferredSimple")
+  putStrLn $ testNestedInferredSimple (Proxy :: Proxy "testNestedInferredSimple")
   putStrLn $ testNestedPolyCall1 (Proxy :: Proxy "testNestedPolyCall1")
   putStrLn $ testNestedPolyCall2 (Proxy :: Proxy "testNestedPolyCall2")
   putStrLn $ testNestedPolyCall3 (Proxy :: Proxy "testNestedPolyCall3")
-  --putStrLn $ testNestedMonoCall (Proxy :: Proxy "testNestedMonoCall")
-  --putStrLn $ testNestedInferredCall1 (Proxy :: Proxy "testNestedInferredCall1")
-  --putStrLn $ testNestedInferredCall2 (Proxy :: Proxy "testNestedInferredCall2")
+  putStrLn $ testNestedMonoCall (Proxy :: Proxy "testNestedMonoCall")
+  putStrLn $ testNestedInferredCall1 (Proxy :: Proxy "testNestedInferredCall1")
+  putStrLn $ testNestedInferredCall2 (Proxy :: Proxy "testNestedInferredCall2")

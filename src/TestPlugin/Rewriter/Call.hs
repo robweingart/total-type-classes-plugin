@@ -6,7 +6,7 @@
 module TestPlugin.Rewriter.Call (rewriteCalls) where
 
 import GHC.Plugins hiding (TcPlugin)
-import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn, LHsBind, LHsExpr, LHsBinds, HsBind, EpAnn, SrcSpanAnn', AbsBinds (abs_tvs, abs_ev_vars, abs_ev_binds, abs_binds, AbsBinds, abs_exports, abs_sig))
+import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn, LHsBind, LHsExpr, LHsBinds, HsBind, EpAnn, SrcSpanAnn', AbsBinds (abs_tvs, abs_ev_vars, abs_ev_binds, abs_binds, AbsBinds, abs_exports, abs_sig), mkHsWrap)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcLclEnv, TcRn)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (eb_rhs), TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar), mkWpLet, EvBindMap (EvBindMap), extendEvBinds, emptyTcEvBinds)
 import Data.Generics (everywhereM, mkM, mkQ, GenericM, GenericQ, Data (gmapM), GenericQ' (unGQ, GQ), extM, ext0, Typeable, everything)
@@ -125,9 +125,6 @@ wrapperLams w = go w ([], [])
     go (WpEvLam ev) (tvs, evs) = return (tvs, ev : evs)
     go _ vs = return vs
 
---newtype MaybeM m x = MaybeM { unMaybeM :: x -> m (Maybe x) }
---
---extMaybeM
 rewriteCallsIn :: UpdateEnv -> GenericM TcM
 rewriteCallsIn ids x = orElseM (mkMMaybe (rewriteLHsBind ids) x) $
                        orElseM (mkMMaybe (rewriteLWrapExpr ids) x) $
@@ -171,7 +168,10 @@ rewriteHsBind ids b@(XHsBindsLR (AbsBinds { abs_tvs=tvs
     [old_ev_binds] -> do
       combined <- addToTcEvBinds old_ev_binds new_ev_binds
       return [combined]
-    _ -> failTcM $ text "Reskolemised AbsBinds with multiple abs_ev_binds"
+    [dfun_ev_binds, local_ev_binds] -> do
+      local_ev_binds' <- addToTcEvBinds local_ev_binds new_ev_binds
+      return [dfun_ev_binds, local_ev_binds']
+    _ -> failTcM $ text "Reskolemised AbsBinds with more than two abs_ev_binds"
   printLnTcM "}"
   return $ Just $ XHsBindsLR (AbsBinds { abs_tvs=tvs
                                        , abs_ev_vars=ev_vars
@@ -187,20 +187,30 @@ rewriteLWrapExpr :: UpdateEnv -> LHsExpr GhcTc -> TcM (Maybe (LHsExpr GhcTc))
 rewriteLWrapExpr updates = wrapLocMMaybeA (rewriteWrapExpr updates)
 
 rewriteWrapExpr :: UpdateEnv -> HsExpr GhcTc -> TcM (Maybe (HsExpr GhcTc))
-rewriteWrapExpr updates outer@(XExpr (WrapExpr (HsWrap _ _))) = do
-  let old_ty = hsExprType outer
-  (expr', maybe_update) <- go outer
-  let new_ty = hsExprType expr'
-  case (eqType old_ty new_ty, maybe_update) of
-    (False, Nothing) -> failTcM $ text "no update but inner type changed " <+> ppr new_ty
-    (_, Just _) -> failTcM $ text "update not resolved"
-    (True, Nothing) -> return $ Just expr'
+rewriteWrapExpr updates outer = do
+  case outer of
+    (XExpr (WrapExpr _)) -> go_outer
+    (HsAppType _ _ _ _) -> go_outer
+    _ -> return Nothing
   where
+    go_outer = do
+      outputFullTcM "Inspecting wrapped expression {" outer
+      let old_ty = hsExprType outer
+      (expr', maybe_update) <- go outer
+      let new_ty = hsExprType expr'
+      case (old_ty `eqType` new_ty, maybe_update) of
+        (False, Nothing) -> failTcM $ text "no update but inner type changed " <+> ppr new_ty
+        (_, Just _) -> failTcM $ text "update not resolved"
+        (True, Nothing) -> do
+          printLnTcM "}"
+          return $ Just expr'
+
     go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe UpdateInfo)
     go expr@(XExpr (WrapExpr (HsWrap wrap old_inner))) = do 
+      outputTcM "XExpr WrapExpr { " expr 
       (wrap', (new_ev_apps, new_inner, maybe_update)) <- reskolemiseWrapper wrap $ do 
         (new_inner, maybe_update) <- go old_inner
-        (new_ev_apps, maybe_update') <- maybe_mk_new wrap old_inner maybe_update
+        (new_ev_apps, maybe_update') <- maybe_mk_new (snd $ hsWrapperTypeSubst wrap (hsExprType old_inner)) maybe_update
         return (new_ev_apps, new_inner, maybe_update')
       let new_wrap = new_ev_apps <.> wrap'
       let new_expr = XExpr (WrapExpr (HsWrap new_wrap new_inner))
@@ -209,7 +219,19 @@ rewriteWrapExpr updates outer@(XExpr (WrapExpr (HsWrap _ _))) = do
           [ text "old:" <+> ppr (hsExprType expr)
           , text "new:" <+> ppr (hsExprType new_expr)
           ])
+      printLnTcM "}"
       return (new_expr, maybe_update)
+    go expr@(HsAppType ty (L loc old_inner) tok wc_type) = do
+      outputTcM "HsAppType { " expr 
+      (new_inner, maybe_update) <- go old_inner
+      (new_ev_apps, maybe_update') <- maybe_mk_new (snd $ piResultTysSubst (hsExprType old_inner) [ty]) maybe_update
+      printLnTcM "}"
+      return (mkHsWrap new_ev_apps $ HsAppType ty (L loc new_inner) tok wc_type, maybe_update')
+    go expr@(HsPar x l_tok (L loc old_inner) r_tok) = do
+      outputTcM "HsPar { " expr 
+      (new_inner, maybe_update) <- go old_inner
+      printLnTcM "}"
+      return (HsPar x l_tok (L loc new_inner) r_tok, maybe_update)
     go expr@(HsVar x (L l var))
       | Just update <- lookupDNameEnv updates $ varName var = do
         outputTcM "Updating type of occurrence: " expr
@@ -220,23 +242,14 @@ rewriteWrapExpr updates outer@(XExpr (WrapExpr (HsWrap _ _))) = do
         failTcM $ text "Inner type is not a changed id, but its type changed " <+> ppr expr'
       return (expr', Nothing)
 
-    maybe_mk_new :: HsWrapper -> HsExpr GhcTc -> Maybe UpdateInfo -> TcM (HsWrapper, Maybe UpdateInfo)
-    maybe_mk_new wrap _ Nothing = do
-      printLnTcM "Skipping wrapper (already done):"
-      printWrapper 1 wrap
-      return (WpHole, Nothing)
-    maybe_mk_new wrap old_inner (Just update)
-      | (_, subst) <- hsWrapperTypeSubst wrap (hsExprType old_inner), elemSubst (last_ty_var update) subst = do
-        printLnTcM "Updating wrapper:"
-        printWrapper 1 wrap
-        let theta = substTheta subst (new_theta update)
-        new_ev_apps <- instCallConstraints (OccurrenceOf $ varName $ new_id update) theta
-        let new_wrap = new_ev_apps
-        printLnTcM "New wrapper:"
-        printWrapper 1 new_wrap
-        return (new_wrap, Nothing)
-      | otherwise = do 
-        printLnTcM "Skipping wrapper (ty lam not found):"
-        printWrapper 1 wrap
-        return (WpHole, Just update)
-rewriteWrapExpr _ _ = return Nothing
+    mk_ev_apps subst update = do
+      let theta = substTheta subst (new_theta update)
+      instCallConstraints (OccurrenceOf $ varName $ new_id update) theta
+
+    maybe_mk_new :: Subst -> Maybe UpdateInfo -> TcM (HsWrapper, Maybe UpdateInfo)
+    maybe_mk_new _ Nothing = return (WpHole, Nothing)
+    maybe_mk_new subst (Just update)
+      | elemSubst (last_ty_var update) subst = do
+        new_ev_apps <- mk_ev_apps subst update
+        return (new_ev_apps, Nothing)
+      | otherwise = return (WpHole, Just update)

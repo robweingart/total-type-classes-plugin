@@ -118,11 +118,6 @@ testNestedMonoSimple x = goMonoSimple x
     goMonoSimple :: Proxy s -> String
     goMonoSimple x' = symbolVal x'
 
-testNested' :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
-testNested' x = go'  x
-  where
-    go' x' = symbolVal x'
-
 testNestedInferredSimple :: forall (s :: Symbol). Proxy s -> String
 testNestedInferredSimple x = goInferredSimple  x
   where
@@ -162,6 +157,18 @@ testNestedInferredCall2 x = goInferredCall2  x
   where
     goInferredCall2  x' = testSimple x'
 
+testLambdaSimple :: forall (s :: Symbol). Proxy s -> String
+testLambdaSimple = \x -> symbolVal x
+
+testExpAppSimple :: forall (s :: Symbol). Proxy s -> String
+testExpAppSimple x = symbolVal @s x
+--
+testExpAppCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testExpAppCall1 x = testSimple @s x
+--
+testExpAppCall2 :: forall (s :: Symbol). Proxy s -> String
+testExpAppCall2 x = testSimple @s x
+
 testAll :: IO ()
 testAll = do
   putStrLn $ testSimple (Proxy :: Proxy "testSimple")
@@ -196,3 +203,7 @@ testAll = do
   putStrLn $ testNestedMonoCall (Proxy :: Proxy "testNestedMonoCall")
   putStrLn $ testNestedInferredCall1 (Proxy :: Proxy "testNestedInferredCall1")
   putStrLn $ testNestedInferredCall2 (Proxy :: Proxy "testNestedInferredCall2")
+  putStrLn $ testLambdaSimple (Proxy :: Proxy "testLambdaSimple")
+  putStrLn $ testExpAppSimple (Proxy :: Proxy "testExpAppSimple")
+  putStrLn $ testExpAppCall1 (Proxy :: Proxy "testExpAppCall1")
+  putStrLn $ testExpAppCall2 (Proxy :: Proxy "testExpAppCall2")

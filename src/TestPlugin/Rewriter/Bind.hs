@@ -29,7 +29,7 @@ import Data.Traversable (mapAccumM)
 
 rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteBinds binds cont = do
-  --outputFullTcM "Full before rewriteBinds: " binds
+  outputFullTcM "Full before rewriteBinds: " binds
   printLnTcM "rewriteBinds {"
   updateEnv <- newTcRef emptyDNameEnv
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds

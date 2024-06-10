@@ -2,7 +2,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# OPTIONS_GHC -fplugin=TestPlugin.Plugin #-}
+{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -10,7 +10,7 @@
 
 module Check where
 
-import TestPlugin
+import TotalClassPlugin
 
 data MyNat = Z | S MyNat
 

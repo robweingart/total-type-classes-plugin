@@ -1,4 +1,4 @@
-module TestPlugin.Rewriter ( module TestPlugin.Rewriter.Solve, totalTcResultAction ) where
+module TotalClassPlugin.Rewriter ( module TotalClassPlugin.Rewriter.Solve, totalTcResultAction ) where
 
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcGblEnv(..), TcM)
@@ -10,10 +10,10 @@ import GHC.Data.Bag (isEmptyBag)
 import Data.Generics (everywhereM, mkM)
 import GHC.Tc.Types.Evidence (HsWrapper (WpLet), TcEvBinds (TcEvBinds, EvBinds), EvBindsVar (ebv_binds, EvBindsVar), evBindMapBinds)
 
-import TestPlugin.Rewriter.Bind (rewriteBinds)
-import TestPlugin.Rewriter.Call (rewriteCalls)
-import TestPlugin.Rewriter.Utils (printLnTcM, failTcM)
-import TestPlugin.Rewriter.Solve
+import TotalClassPlugin.Rewriter.Bind (rewriteBinds)
+import TotalClassPlugin.Rewriter.Call (rewriteCalls)
+import TotalClassPlugin.Rewriter.Utils (printLnTcM, failTcM)
+import TotalClassPlugin.Rewriter.Solve
 
 
 totalTcResultAction :: [CommandLineOption] -> ModSummary -> TcGblEnv -> TcM TcGblEnv

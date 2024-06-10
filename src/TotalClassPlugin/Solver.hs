@@ -1,4 +1,4 @@
-module TestPlugin.Solver (totalTcPlugin) where
+module TotalClassPlugin.Solver (totalTcPlugin) where
 
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Plugin
@@ -7,8 +7,8 @@ import GHC.Tc.Types.Evidence
 import GHC.Tc.Utils.Monad (TcPlugin (..), TcPluginSolveResult (..), mapMaybeM)
 import GHC.Tc.Types.Constraint (Ct)
 
-import TestPlugin.Rewriter.Solve (solveWithPlaceholder)
-import TestPlugin.Checker.Solve (solveCheck)
+import TotalClassPlugin.Rewriter.Solve (solveWithPlaceholder)
+import TotalClassPlugin.Checker.Solve (solveCheck)
 
 totalTcPlugin :: [CommandLineOption] -> Maybe TcPlugin
 totalTcPlugin _ = Just $ 

@@ -1,4 +1,4 @@
-module TestPlugin.Rewriter.Solve ( solveWithPlaceholder ) where 
+module TotalClassPlugin.Rewriter.Solve ( solveWithPlaceholder ) where 
 
 import GHC.Plugins
 import GHC.Tc.Plugin
@@ -8,11 +8,11 @@ import GHC.Core.Predicate (getClassPredTys_maybe)
 import GHC.Core.Class (Class(classTyCon))
 import GHC.Tc.Solver.Monad (runTcS)
 import GHC.Tc.Solver (solveWanteds)
-import TestPlugin.Rewriter.Placeholder (mkPlaceholder)
+import TotalClassPlugin.Rewriter.Placeholder (mkPlaceholder)
 
 totalClassName :: TcPluginM Name
 totalClassName = do
-  Found _ md <- findImportedModule (mkModuleName "TestPlugin") NoPkgQual
+  Found _ md <- findImportedModule (mkModuleName "TotalClassPlugin") NoPkgQual
   lookupOrig md (mkTcOcc "TotalClass")
 
 solveWithPlaceholder :: Ct -> TcPluginM (Maybe (EvTerm, Ct))

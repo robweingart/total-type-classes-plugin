@@ -1,4 +1,4 @@
-module TestPlugin.Rewriter.Env (UpdateInfo(..), UpdateEnv) where
+module TotalClassPlugin.Rewriter.Env (UpdateInfo(..), UpdateEnv) where
 
 import GHC.Plugins
 import GHC.Tc.Utils.TcType (TcThetaType)

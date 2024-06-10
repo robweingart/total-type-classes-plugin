@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module TestPlugin.Checker.TH ( mkEvidenceFun ) where
+module TotalClassPlugin.Checker.TH ( mkEvidenceFun ) where
 
 import Language.Haskell.TH
 

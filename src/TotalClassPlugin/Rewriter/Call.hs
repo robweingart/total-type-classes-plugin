@@ -3,7 +3,7 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE TypeApplications #-}
 
-module TestPlugin.Rewriter.Call (rewriteCalls) where
+module TotalClassPlugin.Rewriter.Call (rewriteCalls) where
 
 import GHC.Plugins hiding (TcPlugin)
 import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), LHsBind, LHsExpr, LHsBinds, HsBind, SrcSpanAnn', AbsBinds (abs_tvs, abs_ev_vars, abs_ev_binds, abs_binds, AbsBinds, abs_exports, abs_sig), mkHsWrap)
@@ -15,8 +15,8 @@ import GHC.Tc.Utils.Monad (readTcRef, updTcRef, wrapLocMA, getEnvs, restoreEnvs,
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
 import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf), SkolemInfoAnon (UnkSkol))
 
-import TestPlugin.Rewriter.Env
-import TestPlugin.Rewriter.Utils
+import TotalClassPlugin.Rewriter.Env
+import TotalClassPlugin.Rewriter.Utils
 import GHC.Core.TyCo.Compare (eqType)
 import Control.Monad (unless, forM_, when)
 import GHC.Core.TyCo.Subst (elemSubst)
@@ -27,7 +27,7 @@ import GHC.Data.Bag (Bag, unionBags, emptyBag)
 import GHC.Tc.Solver (captureTopConstraints, simplifyTop)
 import GHC.Stack (emptyCallStack)
 import Data.Maybe (isJust)
-import TestPlugin.Rewriter.Placeholder (isPlaceholder)
+import TotalClassPlugin.Rewriter.Placeholder (isPlaceholder)
 
 rewriteCalls :: UpdateEnv -> LHsBinds GhcTc -> (LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteCalls ids binds cont

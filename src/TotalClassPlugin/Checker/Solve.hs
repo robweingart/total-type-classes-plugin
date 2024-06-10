@@ -1,4 +1,4 @@
-module TestPlugin.Checker.Solve ( solveCheck ) where
+module TotalClassPlugin.Checker.Solve ( solveCheck ) where
 
 import GHC.Plugins
 import GHC.Tc.Plugin
@@ -8,13 +8,13 @@ import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds))
 import GHC (Class, HsMatchContext (FunRhs, mc_fun))
 import Data.Maybe (mapMaybe)
 import GHC.Core.Class (Class(classTyCon, className))
-import TestPlugin (CheckerResult (NotExhaustive, CheckerSuccess))
+import TotalClassPlugin (CheckerResult (NotExhaustive, CheckerSuccess))
 import GHC.Tc.Gen.Splice (runQuasi)
 import GHC.ThToHs (convertToHsDecls)
 import GHC.Rename.Module (findSplice)
 import GHC.Tc.Module (rnTopSrcDecls, tcTopSrcDecls)
 import GHC.Tc.Solver (captureTopConstraints)
-import TestPlugin.Rewriter.Utils (outputTcM)
+import TotalClassPlugin.Rewriter.Utils (outputTcM)
 import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, addErrTc, failWithTc, setCtLocM)
 import GHC.HsToCore.Monad (initDsTc)
 import GHC.HsToCore.Binds (dsTopLHsBinds)
@@ -23,18 +23,18 @@ import GHC.Data.Bag (emptyBag, mapMaybeBag, headMaybe)
 import GHC.Types.Error (MsgEnvelope(MsgEnvelope, errMsgDiagnostic), Messages (getMessages))
 import GHC.HsToCore.Errors.Types (DsMessage(DsNonExhaustivePatterns))
 import GHC.Tc.Errors.Types (mkTcRnUnknownMessage)
-import TestPlugin.Checker.TH (mkEvidenceFun)
+import TotalClassPlugin.Checker.TH (mkEvidenceFun)
 import Language.Haskell.TH (mkName)
 
 getCheckClass :: TcPluginM Class
 getCheckClass = do
-  Found _ md <- findImportedModule (mkModuleName "TestPlugin") NoPkgQual
+  Found _ md <- findImportedModule (mkModuleName "TotalClassPlugin") NoPkgQual
   name <- lookupOrig md (mkClsOcc "CheckTotality")
   tcLookupClass name
 
 getTotalityEvidenceType :: TcPluginM TyCon
 getTotalityEvidenceType = do
-  Found _ md <- findImportedModule (mkModuleName "TestPlugin") NoPkgQual
+  Found _ md <- findImportedModule (mkModuleName "TotalClassPlugin") NoPkgQual
   name <- lookupOrig md (mkTcOcc "TotalityEvidence")
   tcLookupTyCon name
 

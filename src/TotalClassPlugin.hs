@@ -14,7 +14,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module TestPlugin ( TotalityEvidence, CheckTotality(..), CheckExhaustiveness(..), CheckTermination(..), CheckerOptions(..), CheckerResult(..), assertTotality, TotalClass(..) ) where
+module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckExhaustiveness(..), CheckTermination(..), CheckerOptions(..), CheckerResult(..), assertTotality, TotalClass(..) ) where
 
 import Data.Kind (Constraint)
 import qualified Data.Kind

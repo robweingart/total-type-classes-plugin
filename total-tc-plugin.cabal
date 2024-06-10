@@ -59,20 +59,20 @@ library
     import:           warnings
 
     -- Modules exported by the library.
-    exposed-modules:  TestPlugin, TestPlugin.Plugin
+    exposed-modules:  TotalClassPlugin, TotalClassPlugin.Plugin
 
     -- Modules included in this library but not exported.
     other-modules: 
-        TestPlugin.Solver,
-        TestPlugin.Rewriter,
-        TestPlugin.Rewriter.Placeholder,
-        TestPlugin.Rewriter.Solve,
-        TestPlugin.Rewriter.Bind,
-        TestPlugin.Rewriter.Call,
-        TestPlugin.Rewriter.Utils,
-        TestPlugin.Rewriter.Env,
-        TestPlugin.Checker.Solve,
-        TestPlugin.Checker.TH
+        TotalClassPlugin.Solver,
+        TotalClassPlugin.Rewriter,
+        TotalClassPlugin.Rewriter.Placeholder,
+        TotalClassPlugin.Rewriter.Solve,
+        TotalClassPlugin.Rewriter.Bind,
+        TotalClassPlugin.Rewriter.Call,
+        TotalClassPlugin.Rewriter.Utils,
+        TotalClassPlugin.Rewriter.Env,
+        TotalClassPlugin.Checker.Solve,
+        TotalClassPlugin.Checker.TH
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

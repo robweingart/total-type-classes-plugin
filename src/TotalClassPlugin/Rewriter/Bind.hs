@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 
-module TestPlugin.Rewriter.Bind (rewriteBinds) where
+module TotalClassPlugin.Rewriter.Bind (rewriteBinds) where
 
 import Data.Foldable (forM_, Foldable (toList))
 
@@ -12,7 +12,7 @@ import GHC (HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe
 import Data.Generics (everywhereM, mkM)
 import Control.Monad.State (modify, State, runState, MonadState (put, get))
 import GHC.Data.Bag (filterBagM)
-import TestPlugin.Rewriter.Placeholder (isPlaceholder)
+import TotalClassPlugin.Rewriter.Placeholder (isPlaceholder)
 import GHC.Tc.Utils.TcType (mkTyCoVarTys, substTy, mkPhiTy, evVarPred)
 import Data.Maybe (mapMaybe, listToMaybe)
 import GHC.Tc.Utils.Monad (newTcRef, readTcRef, updTcRef, wrapLocMA, updGblEnv, getGblEnv)
@@ -20,8 +20,8 @@ import GHC.Tc.Utils.Env (tcExtendGlobalEnvImplicit)
 import GHC.Types.Unique.DFM (plusUDFM)
 import GHC.Core.TyCo.Rep (Type (..))
 
-import TestPlugin.Rewriter.Env
-import TestPlugin.Rewriter.Utils
+import TotalClassPlugin.Rewriter.Env
+import TotalClassPlugin.Rewriter.Utils
 import GHC.Core.Unify (matchBindFun, tcUnifyTys)
 import GHC.Hs.Syn.Type (hsWrapperType)
 import Control.Monad (unless, when)

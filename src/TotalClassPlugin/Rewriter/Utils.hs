@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module TestPlugin.Rewriter.Utils (withTcRef, printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, piResultTysSubst, hsWrapperTypeSubst, orElseM, mkMMaybe, orReturn) where
+module TotalClassPlugin.Rewriter.Utils (withTcRef, printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, piResultTysSubst, hsWrapperTypeSubst, orElseM, mkMMaybe, orReturn) where
 
 import Data.Foldable (forM_)
 

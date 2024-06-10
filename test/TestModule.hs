@@ -1,4 +1,4 @@
---{-# OPTIONS_GHC -fplugin=TestPlugin.Plugin #-}
+--{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -12,7 +12,7 @@ module TestModule
 where
 --
 --import Data.Proxy
---import TestPlugin
+--import TotalClassPlugin
 --import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 --
 --instance TotalClass KnownSymbol where

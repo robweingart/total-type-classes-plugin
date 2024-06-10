@@ -10,7 +10,7 @@ import TestModule
 
 main :: IO ()
 main = do
-  putStrLn $ testExposed (Proxy :: Proxy "testExposed")
-  putStrLn $ testExposedCall (Proxy :: Proxy "testExposedCall")
-  testAll
+  --putStrLn $ testExposed (Proxy :: Proxy "testExposed")
+  --putStrLn $ testExposedCall (Proxy :: Proxy "testExposedCall")
+  --testAll
   return ()

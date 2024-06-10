@@ -11,6 +11,7 @@ import GHC.Core.Predicate (getClassPredTys_maybe)
 import TestPlugin.Placeholder (mkPlaceholder)
 import GHC.Tc.Solver (solveWanteds)
 import GHC.Tc.Solver.Monad (runTcS)
+import TestPlugin.Solver.Check (solveCheck)
 
 totalTcPlugin :: [CommandLineOption] -> Maybe TcPlugin
 totalTcPlugin _ = Just $ 
@@ -41,11 +42,18 @@ wantedCtToTotal ct
       else return Nothing
   | otherwise = return Nothing
 
+solveCt :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
+solveCt ct = do
+  res1 <- solveCheck ct
+  case res1 of
+    Just res -> return $ Just res
+    Nothing -> wantedCtToTotal ct
+
 solve :: () -> EvBindsVar -> [Ct] -> [Ct] -> TcPluginM TcPluginSolveResult
 solve () _ _ [] = do
   return $ TcPluginSolveResult [] [] []
 solve () _ _ wanteds = do
-  solvedCts <- mapMaybeM wantedCtToTotal wanteds
+  solvedCts <- mapMaybeM solveCt wanteds
   return $ TcPluginSolveResult 
     { tcPluginSolvedCts = solvedCts
     , tcPluginNewCts = []

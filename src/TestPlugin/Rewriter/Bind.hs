@@ -29,7 +29,7 @@ import Data.Traversable (mapAccumM)
 
 rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteBinds binds cont = do
-  outputFullTcM "Full before rewriteBinds: " binds
+  --outputFullTcM "Full before rewriteBinds: " binds
   printLnTcM "rewriteBinds {"
   updateEnv <- newTcRef emptyDNameEnv
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds
@@ -58,18 +58,18 @@ rewriteXHsBindsLR updateEnv (XHsBindsLR (AbsBinds { abs_tvs=tvs
                                                   , abs_binds=inner_binds
                                                   , abs_sig=sig })) = do --printLnTcM "rewriteXHsBindsLR {"
   newUpdateEnv <- newTcRef emptyDNameEnv
-  printLnTcM "Before:"
-  outputTcM "abs_tvs:" tvs
-  outputTcM "abs_ev_vars:" ev_vars
-  outputTcM "abs_ev_binds:" ev_binds
-  printLnTcM "Exports of this AbsBinds:"
-  forM_ exports $ \ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} -> do
-    outputTcM "Mono id:" mono
-    outputTcM "Mono type:" $ idType mono
-    outputTcM "Poly id:" poly
-    outputTcM "Poly type:" $ idType poly
-    printLnTcM "Wrapper:"
-    printWrapper 1 wrap
+  --printLnTcM "Before:"
+  --outputTcM "abs_tvs:" tvs
+  --outputTcM "abs_ev_vars:" ev_vars
+  --outputTcM "abs_ev_binds:" ev_binds
+  --printLnTcM "Exports of this AbsBinds:"
+  --forM_ exports $ \ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} -> do
+  --  outputTcM "Mono id:" mono
+  --  outputTcM "Mono type:" $ idType mono
+  --  outputTcM "Poly id:" poly
+  --  outputTcM "Poly type:" $ idType poly
+  --  printLnTcM "Wrapper:"
+  --  printWrapper 1 wrap
   inner_binds' <- mapM (wrapLocMA (rewriteFunBind newUpdateEnv)) inner_binds
   (added_ev_vars, ev_binds') <- mapAccumM rewrite_ev_binds [] ev_binds
   exports' <- mapM (rewriteABExport newUpdateEnv tvs ev_vars added_ev_vars) exports
@@ -77,17 +77,17 @@ rewriteXHsBindsLR updateEnv (XHsBindsLR (AbsBinds { abs_tvs=tvs
   newUpdates <- readTcRef newUpdateEnv
   updTcRef updateEnv (plusUDFM newUpdates)
   --printLnTcM "}"
-  printLnTcM "After:"
-  outputTcM "abs_ev_vars:" ev_vars'
-  outputTcM "abs_ev_binds:" ev_binds'
-  printLnTcM "Exports of this AbsBinds:"
-  forM_ exports' $ \ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} -> do
-    outputTcM "Mono id:" mono
-    outputTcM "Mono type:" $ idType mono
-    outputTcM "Poly id:" poly
-    outputTcM "Poly type:" $ idType poly
-    printLnTcM "Wrapper:"
-    printWrapper 1 wrap
+  --printLnTcM "After:"
+  --outputTcM "abs_ev_vars:" ev_vars'
+  --outputTcM "abs_ev_binds:" ev_binds'
+  --printLnTcM "Exports of this AbsBinds:"
+  --forM_ exports' $ \ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} -> do
+  --  outputTcM "Mono id:" mono
+  --  outputTcM "Mono type:" $ idType mono
+  --  outputTcM "Poly id:" poly
+  --  outputTcM "Poly type:" $ idType poly
+  --  printLnTcM "Wrapper:"
+  --  printWrapper 1 wrap
   return $ XHsBindsLR (AbsBinds { abs_tvs=tvs
                                 , abs_ev_vars=ev_vars'
                                 , abs_exports=exports'

@@ -39,7 +39,7 @@ rewriteCalls ids binds cont
     --outputFullTcM "Full before rewriteCalls: " binds
     forM_ ids (outputTcM "")
     (binds', lie) <- captureTopConstraints $ rewriteCallsIn ids binds
-    outputTcM "Captured constraints:" lie
+    --outputTcM "Captured constraints:" lie
     (gbl, lcl) <- getEnvs
     new_ev_binds <- restoreEnvs (gbl, lcl) $ simplifyTop lie
     when (any (isPlaceholder . eb_rhs) new_ev_binds) $ failTcM $ text "Placeholder leaked into global constraints" <+> ppr new_ev_binds

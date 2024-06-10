@@ -1,37 +1,30 @@
-module TestPlugin.Solver.Check where
+module TestPlugin.Checker.Solve ( solveCheck ) where
 
 import GHC.Plugins
 import GHC.Tc.Plugin
 import GHC.Tc.Types.Evidence (EvTerm (EvExpr))
 import GHC.Tc.Types.Constraint (Ct, ctPred, ctLoc)
-import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds), TcLclEnv (tcl_errs))
-import GHC (Class, emptyRdrGroup, HsGroup (hs_valds), HsMatchContext (FunRhs, mc_fun))
-import Language.Haskell.TH (mkName, runQ, nameSpace)
-import Language.Haskell.TH.Syntax (lift)
+import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds))
+import GHC (Class, HsMatchContext (FunRhs, mc_fun))
 import Data.Maybe (mapMaybe)
 import GHC.Core.Class (Class(classTyCon, className))
 import TestPlugin (CheckerResult (NotExhaustive, CheckerSuccess))
 import GHC.Tc.Gen.Splice (runQuasi)
 import GHC.ThToHs (convertToHsDecls)
-import GHC.Tc.Types.Origin (UserTypeCtxt(GenSigCtxt))
-import GHC.Tc.Gen.Bind (tcTopBinds)
-import GHC.Rename.Bind (rnTopBindsLHS, makeMiniFixityEnv)
 import GHC.Rename.Module (findSplice)
 import GHC.Tc.Module (rnTopSrcDecls, tcTopSrcDecls)
 import GHC.Tc.Solver (captureTopConstraints)
 import TestPlugin.Rewriter.Utils (outputTcM)
-import GHC.Tc.Utils.Monad (readTcRef, setGblEnv, updTopEnv, updTopFlags, updGblEnv, addDiagnosticTcM, addErrTc, failWithTc, setCtLocM)
+import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, addErrTc, failWithTc, setCtLocM)
 import GHC.HsToCore.Monad (initDsTc)
 import GHC.HsToCore.Binds (dsTopLHsBinds)
 import GHC.Tc.Zonk.Type (zonkTopDecls)
-import GHC.Data.Bag (emptyBag, filterBag, mapMaybeBag, headMaybe)
-import GHC.Data.EnumSet (insert)
+import GHC.Data.Bag (emptyBag, mapMaybeBag, headMaybe)
 import GHC.Types.Error (MsgEnvelope(MsgEnvelope, errMsgDiagnostic), Messages (getMessages))
 import GHC.HsToCore.Errors.Types (DsMessage(DsNonExhaustivePatterns))
 import GHC.Tc.Errors.Types (mkTcRnUnknownMessage)
-import Control.Monad (when)
-import GHC.Plugins (tidyNameOcc, occNameString, nameOccName)
-import TestPlugin.Solver.TH (mkEvidenceFun)
+import TestPlugin.Checker.TH (mkEvidenceFun)
+import Language.Haskell.TH (mkName)
 
 getCheckClass :: TcPluginM Class
 getCheckClass = do

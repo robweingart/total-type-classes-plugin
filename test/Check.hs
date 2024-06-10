@@ -7,7 +7,6 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeApplications #-}
-{-# OPTIONS_GHC -ddump-ds #-}
 
 module Check where
 
@@ -32,7 +31,7 @@ class C' (n :: MyNat) where
 
 instance C' Z where
 
--- instance C' (S Z) where
+instance C' (S Z) where
 
 instance C' n => C' (S (S n)) where
 

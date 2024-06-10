@@ -1,4 +1,4 @@
-module TestPlugin.Placeholder (mkPlaceholder, isPlaceholder, getPlaceholderPredType) where
+module TestPlugin.Rewriter.Placeholder (mkPlaceholder, isPlaceholder, getPlaceholderPredType) where
 
 import GHC.Plugins
 import GHC.Tc.Types.Evidence (EvTerm (EvExpr))

@@ -62,7 +62,17 @@ library
     exposed-modules:  TestPlugin, TestPlugin.Plugin
 
     -- Modules included in this library but not exported.
-    other-modules: TestPlugin.Solver, TestPlugin.Rewriter, TestPlugin.Placeholder, TestPlugin.Rewriter.Bind, TestPlugin.Rewriter.Call, TestPlugin.Rewriter.Utils, TestPlugin.Rewriter.Env, TestPlugin.Solver.Check, TestPlugin.Solver.TH
+    other-modules: 
+        TestPlugin.Solver,
+        TestPlugin.Rewriter,
+        TestPlugin.Rewriter.Placeholder,
+        TestPlugin.Rewriter.Solve,
+        TestPlugin.Rewriter.Bind,
+        TestPlugin.Rewriter.Call,
+        TestPlugin.Rewriter.Utils,
+        TestPlugin.Rewriter.Env,
+        TestPlugin.Checker.Solve,
+        TestPlugin.Checker.TH
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

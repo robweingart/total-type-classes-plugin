@@ -6,10 +6,10 @@
 module TestPlugin.Rewriter.Call (rewriteCalls) where
 
 import GHC.Plugins hiding (TcPlugin)
-import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), GhcRn, LHsBind, LHsExpr, LHsBinds, HsBind, EpAnn, SrcSpanAnn', AbsBinds (abs_tvs, abs_ev_vars, abs_ev_binds, abs_binds, AbsBinds, abs_exports, abs_sig), mkHsWrap)
-import GHC.Tc.Types (TcM, TcGblEnv (..), TcLclEnv, TcRn)
-import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (eb_rhs), TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar), mkWpLet, EvBindMap (EvBindMap), extendEvBinds, emptyTcEvBinds)
-import Data.Generics (everywhereM, mkM, mkQ, GenericM, GenericQ, Data (gmapM), GenericQ' (unGQ, GQ), extM, ext0, Typeable, everything)
+import GHC (HsBindLR(..), GhcTc, HsExpr(..), XXExprGhcTc(..), HsWrap (HsWrap), LHsBind, LHsExpr, LHsBinds, HsBind, SrcSpanAnn', AbsBinds (abs_tvs, abs_ev_vars, abs_ev_binds, abs_binds, AbsBinds, abs_exports, abs_sig), mkHsWrap)
+import GHC.Tc.Types (TcM, TcGblEnv (..), TcLclEnv)
+import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (eb_rhs), TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar), mkWpLet, extendEvBinds, emptyTcEvBinds)
+import Data.Generics (mkM, mkQ, GenericM, Data (gmapM), everything)
 import GHC.Hs.Syn.Type (hsExprType)
 import GHC.Tc.Utils.Monad (readTcRef, updTcRef, wrapLocMA, getEnvs, restoreEnvs, setGblEnv, addTopEvBinds, setSrcSpanA)
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
@@ -27,7 +27,7 @@ import GHC.Data.Bag (Bag, unionBags, emptyBag)
 import GHC.Tc.Solver (captureTopConstraints, simplifyTop)
 import GHC.Stack (emptyCallStack)
 import Data.Maybe (isJust)
-import TestPlugin.Placeholder (isPlaceholder)
+import TestPlugin.Rewriter.Placeholder (isPlaceholder)
 
 rewriteCalls :: UpdateEnv -> LHsBinds GhcTc -> (LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteCalls ids binds cont

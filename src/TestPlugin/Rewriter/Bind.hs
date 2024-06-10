@@ -8,11 +8,11 @@ import Data.Foldable (forM_, Foldable (toList))
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef, TcLclEnv)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), isIdHsWrapper)
-import GHC (GhcTc, HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds, LHsLocalBinds, GhcPass (GhcTc), HsLocalBinds, HsLocalBindsLR (HsIPBinds), IPBind (IPBind), HsIPBinds (IPBinds), LIPBind)
+import GHC (HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds, HsLocalBinds, HsLocalBindsLR (HsIPBinds), HsIPBinds (IPBinds), GhcTc)
 import Data.Generics (everywhereM, mkM)
 import Control.Monad.State (modify, State, runState, MonadState (put, get))
 import GHC.Data.Bag (filterBagM)
-import TestPlugin.Placeholder (isPlaceholder)
+import TestPlugin.Rewriter.Placeholder (isPlaceholder)
 import GHC.Tc.Utils.TcType (mkTyCoVarTys, substTy, mkPhiTy, evVarPred)
 import Data.Maybe (mapMaybe, listToMaybe)
 import GHC.Tc.Utils.Monad (newTcRef, readTcRef, updTcRef, wrapLocMA, updGblEnv, getGblEnv)
@@ -72,7 +72,9 @@ rewriteXHsBindsLR updateEnv (XHsBindsLR (AbsBinds { abs_tvs=tvs
   --  printWrapper 1 wrap
   inner_binds' <- mapM (wrapLocMA (rewriteFunBind newUpdateEnv)) inner_binds
   (added_ev_vars, ev_binds') <- mapAccumM rewrite_ev_binds [] ev_binds
-  exports' <- mapM (rewriteABExport newUpdateEnv tvs ev_vars added_ev_vars) exports
+  exports' <- case added_ev_vars of
+    [] -> return exports
+    _  -> mapM (rewriteABExport newUpdateEnv tvs ev_vars added_ev_vars) exports
   let ev_vars' = ev_vars ++ added_ev_vars
   newUpdates <- readTcRef newUpdateEnv
   updTcRef updateEnv (plusUDFM newUpdates)
@@ -102,13 +104,6 @@ rewriteXHsBindsLR updateEnv (XHsBindsLR (AbsBinds { abs_tvs=tvs
         outputTcM "Rewrite result:" ev_binds'
         outputTcM "Introduced ev vars:" ev_vars'
       return (vars ++ ev_vars', ev_binds')
-
-    mono_to_poly ev_vars' ty = do
-      let binders = mkTyVarBinders InferredSpec tvs
-      outputTcM "Adding foralls:" binders
-      let theta = map evVarPred ev_vars'
-      outputTcM "Adding theta:" theta
-      return $ mkInvisForAllTys binders (mkPhiTy theta ty)
   
 rewriteXHsBindsLR _ b = return b
 
@@ -116,6 +111,7 @@ rewriteABExport :: TcRef UpdateEnv -> [TyVar] -> [EvVar] -> [EvVar] -> ABExport 
 rewriteABExport updateEnv tvs old_ev_vars added_ev_vars e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = do
   (new_mono, update_from_mono) <- do_mono_update
   let binders = mkTyVarBinders InferredSpec tvs
+  outputTcM "ABExport: " e
   outputTcM "Adding foralls:" binders
   let theta = map evVarPred (old_ev_vars ++ added_ev_vars)
   outputTcM "Adding theta:" theta

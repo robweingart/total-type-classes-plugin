@@ -99,7 +99,6 @@ addToWpLet new_ev_binds wrap = do
   where
     go WpHole _ = return WpHole
     go (WpCompose w1 w2) counter = liftA2 (<.>) (go w1 counter) (go w2 counter)
-    go (WpFun _ _ _) _ = failTcM $ text "unexpected WpFun"
     go (WpLet ev_binds) counter = do
       updTcRef counter (+1)
       mkWpLet <$> addToTcEvBinds ev_binds new_ev_binds
@@ -120,7 +119,7 @@ wrapperLams w = go w ([], [])
     go :: HsWrapper -> ([TyVar], [EvVar]) -> TcM ([TyVar], [EvVar])
     go WpHole vs = return vs
     go (WpCompose w1 w2) vs = go w2 vs >>= go w1
-    go (WpFun _ _ _) _ = failTcM $ text "unexpected WpFun"
+    go (WpFun _ w2 _) vs = go w2 vs
     go (WpTyLam tv) (tvs, evs) = return (tv : tvs, evs)
     go (WpEvLam ev) (tvs, evs) = return (tvs, ev : evs)
     go _ vs = return vs
@@ -128,7 +127,7 @@ wrapperLams w = go w ([], [])
 rewriteCallsIn :: UpdateEnv -> GenericM TcM
 rewriteCallsIn ids x = orElseM (mkMMaybe (rewriteLHsBind ids) x) $
                        orElseM (mkMMaybe (rewriteLWrapExpr ids) x) $
-                       mkM (noRewriteLVar ids) x >>= gmapM (rewriteCallsIn ids)
+                       (mkM (noRewriteLVar ids) x >>= gmapM (rewriteCallsIn ids))
 
 noRewriteLVar :: UpdateEnv -> LHsExpr GhcTc -> TcM (LHsExpr GhcTc)
 noRewriteLVar updates = wrapLocMA (noRewriteVar updates)
@@ -136,7 +135,13 @@ noRewriteLVar updates = wrapLocMA (noRewriteVar updates)
 noRewriteVar :: UpdateEnv -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
 noRewriteVar updates expr@(HsVar _ (L _ var))
   | Just _ <- lookupDNameEnv updates (varName var) = failTcM $ text "call to modified function " <+> ppr expr <+> text " is not immediate child of a wrapper"
-noRewriteVar _ expr = return expr
+  | otherwise = do
+    outputTcM "noRewriteVar unique: " $ varUnique var
+    outputTcM "noRewriteVar updates: " updates
+    outputTcM "noRewriteVar ok: " expr
+    return expr
+noRewriteVar _ expr = do
+  return expr
 
 wrapLocMMaybeA :: (a -> TcM (Maybe b)) -> GenLocated (SrcSpanAnn' ann) a -> TcM (Maybe (GenLocated (SrcSpanAnn' ann) b))
 wrapLocMMaybeA fn (L loc a) = setSrcSpanA loc $ do 
@@ -210,7 +215,9 @@ rewriteWrapExpr updates outer = do
       outputTcM "XExpr WrapExpr { " expr 
       (wrap', (new_ev_apps, new_inner, maybe_update)) <- reskolemiseWrapper wrap $ do 
         (new_inner, maybe_update) <- go old_inner
-        (new_ev_apps, maybe_update') <- maybe_mk_new (snd $ hsWrapperTypeSubst wrap (hsExprType old_inner)) maybe_update
+        let subst = snd $ hsWrapperTypeSubst wrap (hsExprType old_inner)
+        outputTcM "WrapExpr subst: " subst
+        (new_ev_apps, maybe_update') <- maybe_mk_new subst maybe_update
         return (new_ev_apps, new_inner, maybe_update')
       let new_wrap = new_ev_apps <.> wrap'
       let new_expr = XExpr (WrapExpr (HsWrap new_wrap new_inner))
@@ -236,7 +243,13 @@ rewriteWrapExpr updates outer = do
       | Just update <- lookupDNameEnv updates $ varName var = do
         outputTcM "Updating type of occurrence: " expr
         return ((HsVar x (L l (new_id update))), Just update)
+    go expr@(HsApp x (L l f) arg) = do
+      outputTcM "HsApp {" expr
+      (new_f, maybe_update) <- go f
+      printLnTcM "}"
+      return (HsApp x (L l new_f) arg, maybe_update)
     go expr = do
+      outputTcM "Reached non-wrapper expr " expr
       expr' <- rewriteCallsIn updates expr
       unless (hsExprType expr `eqType` hsExprType expr') $
         failTcM $ text "Inner type is not a changed id, but its type changed " <+> ppr expr'

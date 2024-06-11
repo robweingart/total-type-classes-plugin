@@ -8,6 +8,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
+{-# OPTIONS_GHC -dcore-lint #-}
 module TestModule 
 --  (testExposed, testExposedCall, testAll)
 where
@@ -20,17 +21,20 @@ import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 instance TotalClass KnownSymbol where
   totalityEvidence = assertTotality
 
----- Function requiring rewrite
---testSimple :: forall (s :: Symbol). Proxy s -> String
---testSimple x = symbolVal x
---
----- Function requiring rewrite
---testExposed :: forall (s :: Symbol). Proxy s -> String
---testExposed x = symbolVal x
---
----- Call to rewritten function, caller already has constraint
---testExposedCall :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
---testExposedCall x = testSimple x
+testBaseline :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
+testBaseline x = symbolVal x
+
+-- Function requiring rewrite
+testSimple :: forall (s :: Symbol). Proxy s -> String
+testSimple x = symbolVal x
+
+-- Function requiring rewrite
+testExposed :: forall (s :: Symbol). Proxy s -> String
+testExposed x = symbolVal x
+
+-- Call to rewritten function, caller already has constraint
+testExposedCall :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
+testExposedCall x = testSimple x
 --
 ---- Call to rewritten function, caller will also need rewrite
 --testTransExposedCall :: forall (s :: Symbol). Proxy s -> String 
@@ -171,18 +175,16 @@ instance TotalClass KnownSymbol where
 --testExpAppCall2 :: forall (s :: Symbol). Proxy s -> String
 --testExpAppCall2 x = testSimple @s x
 
---testArgBeforeTy :: forall (s :: Symbol). () -> KnownSymbol s => Proxy s -> String
---testArgBeforeTy () x = symbolVal x
+testArgBeforeTy :: () -> forall (s :: Symbol). Proxy s -> String
+testArgBeforeTy () x = symbolVal x
+
+testArgBeforeTy' :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testArgBeforeTy' x = testArgBeforeTy () x
 --
---testArgBeforeTy' :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
---testArgBeforeTy' x = testArgBeforeTy () x
---
---testAll :: IO ()
---testAll = do
---  putStrLn $ testSimple (Proxy :: Proxy "testSimple")
---  putStrLn $ testExposed (Proxy :: Proxy "testExposed")
---  putStrLn $ testExposedCall (Proxy :: Proxy "testExposedCall") 
---  putStrLn $ testTransExposedCall (Proxy :: Proxy "testTransExposedCall") 
+testAll :: IO ()
+testAll = do
+  putStrLn $ testBaseline (Proxy :: Proxy "testBaseline")
+  putStrLn $ testSimple (Proxy :: Proxy "testSimple")
 --  putStrLn $ testCall1 (Proxy :: Proxy "testCall1") 
 --  putStrLn $ testCall2 (Proxy :: Proxy "testCall2") 
 --  putStrLn $ testSimples (Proxy :: Proxy "testSimples") 
@@ -215,3 +217,5 @@ instance TotalClass KnownSymbol where
 --  putStrLn $ testExpAppSimple (Proxy :: Proxy "testExpAppSimple")
 --  putStrLn $ testExpAppCall1 (Proxy :: Proxy "testExpAppCall1")
 --  putStrLn $ testExpAppCall2 (Proxy :: Proxy "testExpAppCall2")
+  putStrLn $ testArgBeforeTy () (Proxy :: Proxy "testArgBeforeTy")
+  putStrLn $ testArgBeforeTy' (Proxy :: Proxy "testArgBeforeTy'")

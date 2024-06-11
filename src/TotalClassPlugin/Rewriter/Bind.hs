@@ -72,9 +72,7 @@ rewriteXHsBindsLR updateEnv (XHsBindsLR (AbsBinds { abs_tvs=tvs
   --  printWrapper 1 wrap
   inner_binds' <- mapM (wrapLocMA (rewriteFunBind newUpdateEnv)) inner_binds
   (added_ev_vars, ev_binds') <- mapAccumM rewrite_ev_binds [] ev_binds
-  exports' <- case added_ev_vars of
-    [] -> return exports
-    _  -> mapM (rewriteABExport newUpdateEnv tvs ev_vars added_ev_vars) exports
+  exports' <- mapM (rewriteABExport newUpdateEnv tvs ev_vars added_ev_vars) exports
   let ev_vars' = ev_vars ++ added_ev_vars
   newUpdates <- readTcRef newUpdateEnv
   updTcRef updateEnv (plusUDFM newUpdates)
@@ -153,8 +151,8 @@ rewriteFunBind :: TcRef UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc
 rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick), fun_matches=MG{mg_ext=(MatchGroupTc args res _)} }) = do
   let old_ty = varType fid
   let wrapped = hsWrapperType wrapper $ mkScaledFunTys args res
-  let old_vars = mapMaybe namedBinderVar $ fst $ splitInvisPiTys old_ty
-  let w_vars = mapMaybe namedBinderVar $ fst $ splitInvisPiTys wrapped
+  let old_vars = mapMaybe namedBinderVar $ fst $ splitPiTys old_ty
+  let w_vars = mapMaybe namedBinderVar $ fst $ splitPiTys wrapped
   let maybe_subst = tcUnifyTys (matchBindFun (mkVarSet w_vars)) (mkTyCoVarTys w_vars) (mkTyCoVarTys old_vars)
   wrapper_res <- rewriteHsWrapper wrapper
   case (wrapper_res, maybe_subst) of
@@ -167,6 +165,7 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
       printWrapper 1 wrapper
       printLnTcM "new wrapper: "
       printWrapper 1 wrapper'
+      outputTcM "Substitution: " subst
       let theta' = substTheta subst theta
       last_tv' <- case substTyVar subst last_tv of
         TyVarTy tv -> return tv
@@ -231,20 +230,20 @@ rewriteHsWrapper wrapper = do
   res <- case tys of
     [] -> return Nothing
     [[]] -> return Nothing
-    [newArgTys] -> do
-      tv <- lastTyVar wrapper
-      return $ Just (wrapper', newArgTys, tv) 
+    [new_ev_vars] -> do
+      (tv, wrapper'') <- rewriteLastTyVar new_ev_vars wrapper'
+      return $ Just (wrapper'', map evVarPred new_ev_vars, tv) 
     _ -> failTcM $ text "encountered multiple zonked WpLet, this should not happen"
   --printLnTcM "}"
   return res
 
-rewriteWpLet :: TcRef [[PredType]] -> HsWrapper -> TcM HsWrapper
+rewriteWpLet :: TcRef [[EvVar]] -> HsWrapper -> TcM HsWrapper
 rewriteWpLet newArgsRef (WpLet ev_binds) = do
   --printLnTcM "rewriteWpLet {"
   (ev_vars, ev_binds') <- rewriteTcEvBinds ev_binds
-  updTcRef newArgsRef ((varType <$> ev_vars) :)
+  updTcRef newArgsRef (ev_vars :)
   --printLnTcM "}"
-  return $ foldr ((<.>) . WpEvLam) (WpLet ev_binds') ev_vars
+  return $ WpLet ev_binds'
 rewriteWpLet _ w = return w
 
 rewriteTcEvBinds :: TcEvBinds -> TcM ([EvVar], TcEvBinds)
@@ -258,18 +257,18 @@ isNotPlaceholder (EvBind {eb_lhs=evVar, eb_rhs=evTerm})
     return False
   | otherwise = return True
 
-lastTyVar :: HsWrapper -> TcM TyVar
-lastTyVar w = go w >>= \case
-  Nothing -> failTcM (text "Wrapper has no WpTyLam" <+> ppr w)
-  Just tv -> return tv
+rewriteLastTyVar :: [EvVar] -> HsWrapper -> TcM (TyVar, HsWrapper)
+rewriteLastTyVar ev_vars w = case go w of
+  (Nothing, _) -> failTcM (text "Wrapper has no WpTyLam" <+> ppr w)
+  (Just tv, w') -> return (tv, w')
   where
-    go WpHole = return Nothing
-    go (WpCompose w1 w2) = go w2 >>= \case
-      Nothing -> go w1
-      Just tv -> return $ Just tv
-    go (WpTyLam tv) = return $ Just tv
-    go (WpFun _ _ _) = failTcM (text "unexpected WpFun inside " <+> ppr w)
-    go _ = return Nothing
+    vars = tyCoVarsOfTypes (map evVarPred ev_vars)
+    go (WpCompose w1 w2) = case go w2 of
+      (Nothing, w2') -> let (tv, w1') = go w1 in (tv, w1' <.> w2')
+      (Just tv, w2') -> (Just tv, w1 <.> w2')
+    go (WpTyLam tv) = if tv `elemVarSet` vars then (Just tv, WpTyLam tv <.> foldr ((<.>) . WpEvLam) WpHole ev_vars) else (Nothing, WpTyLam tv)
+    go (WpFun w1 w2 args) = let (tv, w2') = go w2 in (tv, WpFun w1 w2' args)
+    go w' = (Nothing, w')
 
 checkDoneLHsBind :: LHsBind GhcTc -> TcM (LHsBind GhcTc)
 checkDoneLHsBind = wrapLocMA checkDoneHsBind

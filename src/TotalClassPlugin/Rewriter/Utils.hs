@@ -65,7 +65,11 @@ printWrapper n w@(WpCompose l r) = do
   output' n "WpCompose" w
   printWrapper (n+1) l
   printWrapper (n+1) r
-printWrapper n w@(WpFun {}) = output' n "WpFun" w
+printWrapper n w@(WpFun l r arg) = do
+  output' n "WpFun" w
+  output' (n+1) "arg: " arg
+  printWrapper (n+1) l
+  printWrapper (n+1) r
 printWrapper n w@(WpCast _) = output' n "WpCast" w
 printWrapper n w@(WpEvLam evvar) = do
   output' n "WpEvLam" w

@@ -11,8 +11,8 @@ import qualified TestModule
 
 main :: IO ()
 main = do
-  --putStrLn $ testExposed (Proxy :: Proxy "testExposed")
-  --putStrLn $ testExposedCall (Proxy :: Proxy "testExposedCall")
-  Check.testAll
-  --TestModule.testAll
+  putStrLn $ TestModule.testExposed (Proxy :: Proxy "testExposed")
+  putStrLn $ TestModule.testExposedCall (Proxy :: Proxy "testExposedCall")
+  TestModule.testAll
+  --Check.testAll
   return ()

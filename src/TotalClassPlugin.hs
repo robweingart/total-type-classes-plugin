@@ -14,7 +14,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckExhaustiveness(..), CheckTermination(..), CheckerOptions(..), CheckerResult(..), assertTotality, TotalClass(..) ) where
+module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResult(..), assertTotality, TotalClass(..) ) where
 
 import Data.Kind (Constraint)
 import qualified Data.Kind
@@ -30,20 +30,20 @@ data TotalityEvidence c where UnsafeTotalityEvidence :: TotalityEvidence c deriv
 assertTotality :: IsClassKind ck => TotalityEvidence (c :: ck)
 assertTotality = UnsafeTotalityEvidence
 
-data CheckExhaustiveness = ViaPmc | AssertExhaustiveness
-
-data CheckTermination = ViaPaterson | AssertTermination
-
-data CheckerOptions = COpt CheckExhaustiveness CheckTermination
-
-data CheckerResult = CheckerSuccess | NotExhaustive | NotTerminating
+--data CheckExhaustiveness = ViaPmc | AssertExhaustiveness
+--
+--data CheckTermination = ViaPaterson | AssertTermination
+--
+--data CheckerOptions = COpt CheckExhaustiveness CheckTermination
 
 --type family ResultEvidence c (r :: CheckerResult) :: Type where
 --  ResultEvidence c CheckerSuccess = TotalityEvidence c
 --  ResultEvidence _ _ = ()
 
---class IsClassKind ck => CheckTotalityResult (c :: ck) (opt :: CheckerOptions) (r :: CheckerResult) | c opt -> r where
---  resultEvidence :: TotalityEvidence c
+type CheckTotalityResult :: forall {ck :: Data.Kind.Type}. ck -> Constraint
+class CheckTotalityResult (c :: ck) where
+  isExhaustive :: Bool
+  isTerminating :: Bool
 
 --class IsClassKind ck => CheckTotality (c :: ck) where
 type CheckTotality :: forall {ck :: Data.Kind.Type}. ck -> Constraint

@@ -12,6 +12,7 @@
 module Check where
 
 import TotalClassPlugin
+import Control.Exception (evaluate, assert)
 
 data MyNat = Z | S MyNat
 
@@ -28,13 +29,13 @@ instance C Z y => C Z (S y) where
 
 instance C x y => C (S x) y
 
-class C' (n :: MyNat) where
+class CNonEx (n :: MyNat) where
 
-instance C' Z where
+instance CNonEx Z where
 
-instance C' (S Z) where
+--instance CNonEx (S Z) where
 
-instance C' n => C' (S (S n)) where
+instance CNonEx n => CNonEx (S (S n)) where
 
 class CNonTerm (n :: MyNat) where
 
@@ -45,13 +46,28 @@ instance CNonTerm (S n) => CNonTerm (S n)
 
 -- $(mkEvidenceFun ''C [True, True])
 -- 
--- $(mkEvidenceFun ''C' [True])
+-- $(mkEvidenceFun ''CNonEx [True])
 
 instance TotalClass IsNat where
   totalityEvidence = checkTotality 
 
-instance TotalClass C' where
-  totalityEvidence = checkTotality 
+testGood :: IO ()
+testGood = do
+  evaluate $ assert (isExhaustive @C) ()
+  evaluate $ assert (isTerminating @C) ()
 
---instance TotalClass CNonTerm where
---  totalityEvidence = checkTotality 
+testNonEx :: IO ()
+testNonEx = do
+  evaluate $ assert (not $ isExhaustive @CNonEx) ()
+  evaluate $ assert (isTerminating @CNonEx) ()
+
+testNonTerm :: IO ()
+testNonTerm = do
+  evaluate $ assert (isExhaustive @CNonTerm) ()
+  evaluate $ assert (not $ isTerminating @CNonTerm) ()
+
+testAll :: IO ()
+testAll = do
+  testGood
+  testNonEx
+  testNonTerm

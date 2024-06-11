@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiWayIf #-}
+
 module TotalClassPlugin.Checker.Solve ( solveCheck ) where
 
 import GHC.Plugins
@@ -8,13 +10,11 @@ import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds))
 import GHC (Class, HsMatchContext (FunRhs, mc_fun))
 import Data.Maybe (mapMaybe)
 import GHC.Core.Class (Class(classTyCon, className))
-import TotalClassPlugin (CheckerResult (NotExhaustive, CheckerSuccess, NotTerminating))
 import GHC.Tc.Gen.Splice (runQuasi)
 import GHC.ThToHs (convertToHsDecls)
 import GHC.Rename.Module (findSplice)
 import GHC.Tc.Module (rnTopSrcDecls, tcTopSrcDecls)
 import GHC.Tc.Solver (captureTopConstraints)
-import TotalClassPlugin.Rewriter.Utils (outputTcM)
 import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, addErrTc, failWithTc, setCtLocM, tryTc, mapMaybeM)
 import GHC.HsToCore.Monad (initDsTc)
 import GHC.HsToCore.Binds (dsTopLHsBinds)
@@ -33,11 +33,18 @@ import Data.Foldable (forM_)
 import GHC.Tc.Utils.Env (tcGetInstEnvs)
 import TotalClassPlugin.Checker.Errors (checkDsResult, TotalClassCheckerMessage, checkTcRnResult, failWithTotal, checkPaterson)
 import GHC.Data.Maybe (listToMaybe)
+import Data.Bool (bool)
 
 getCheckClass :: TcPluginM Class
 getCheckClass = do
   Found _ md <- findImportedModule (mkModuleName "TotalClassPlugin") NoPkgQual
   name <- lookupOrig md (mkClsOcc "CheckTotality")
+  tcLookupClass name
+
+getCheckResultClass :: TcPluginM Class
+getCheckResultClass = do
+  Found _ md <- findImportedModule (mkModuleName "TotalClassPlugin") NoPkgQual
+  name <- lookupOrig md (mkClsOcc "CheckTotalityResult")
   tcLookupClass name
 
 getTotalityEvidenceType :: TcPluginM TyCon
@@ -46,35 +53,35 @@ getTotalityEvidenceType = do
   name <- lookupOrig md (mkTcOcc "TotalityEvidence")
   tcLookupTyCon name
 
-addErrDsTc :: DsMessage -> TcM ()
-addErrDsTc ds_msg = addErrTc (mkTcRnUnknownMessage ds_msg)
-
-failWithDsTc :: DsMessage -> TcM a
-failWithDsTc ds_msg = failWithTc (mkTcRnUnknownMessage ds_msg)
-
 solveCheck :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
 solveCheck ct = case splitTyConApp_maybe (ctPred ct) of
   Just (tc, tys) | Just targetClass <- tyConClass_maybe tc -> do
     tcPluginIO $ putStrLn "checking for CheckTotality"
     checkClass <- getCheckClass
-    if targetClass /= checkClass
-    then return Nothing
-    else case tys of
-      --[ck, c, opt] | Just (opt_tc, opt_tys) <- splitTyConApp_maybe opt -> case opt_tys of
-      --  [ex_opt, term_opt] -> do
-      --    do_ex <- case splitTyConApp_maybe of
-      --      Just ex_opt_tc -> 
-      --  _ -> fail "wrong options type"
-      [ck, c] -> case splitTyConApp_maybe c of
-        Just (tc', []) | Just cls <- tyConClass_maybe tc' -> do
-          (True, True) <- unsafeTcPluginTcM (setCtLocM (ctLoc ct) $ check cls True)
-          ev_term <- mk_check_inst ck tc'
-          return $ Just (ev_term, ct)
-            
-        _ -> return Nothing
-        
-        
-      _ -> fail "wrong class app type"
+    checkResultClass <- getCheckResultClass
+    let maybe_get_result = if | targetClass == checkClass -> Just False
+                              | targetClass == checkResultClass -> Just True
+                              | otherwise -> Nothing
+    case maybe_get_result of
+      Nothing -> return Nothing
+      Just get_result -> case tys of
+        --[ck, c, opt] | Just (opt_tc, opt_tys) <- splitTyConApp_maybe opt -> case opt_tys of
+        --  [ex_opt, term_opt] -> do
+        --    do_ex <- case splitTyConApp_maybe of
+        --      Just ex_opt_tc -> 
+        --  _ -> fail "wrong options type"
+        [ck, c] -> case splitTyConApp_maybe c of
+          Just (tc', []) | Just cls <- tyConClass_maybe tc' -> do
+            res <- unsafeTcPluginTcM (setCtLocM (ctLoc ct) $ check cls (not get_result))
+            ev_term <- if get_result
+              then mk_check_result_inst ck tc' res
+              else mk_check_inst ck tc'
+            return $ Just (ev_term, ct)
+              
+          _ -> return Nothing
+          
+          
+        _ -> fail "wrong class app type"
   _ -> return Nothing
 
 check :: Class -> Bool -> TcM (Bool, Bool)
@@ -122,6 +129,17 @@ mk_check_inst ck tc = do
   let tot_ev_ty = mkTyConApp tot_ev_tc [ck, c_ty]
   let check_dc = tyConSingleDataCon (classTyCon check_class)
   return $ EvExpr $ mkCoreConApps check_dc [Type ck, Type c_ty, mkImpossibleExpr tot_ev_ty "TotalityEvidence"]
+
+mk_check_result_inst :: Type -> TyCon -> (Bool, Bool) -> TcPluginM EvTerm
+mk_check_result_inst ck tc (ex_res, term_res) = do
+  check_result_class <- getCheckResultClass
+  let c_ty = mkTyConTy tc
+  let check_result_dc = tyConSingleDataCon (classTyCon check_result_class)
+  return $ EvExpr $ mkCoreConApps check_result_dc [Type ck, Type c_ty, boolToCoreExpr ex_res, boolToCoreExpr term_res]
+
+boolToCoreExpr :: Bool -> CoreExpr
+boolToCoreExpr False = mkConApp falseDataCon []
+boolToCoreExpr True = mkConApp trueDataCon []
 
 splitInstTyForValidity :: Type -> (ThetaType, Type)
 splitInstTyForValidity = split_context [] . drop_foralls

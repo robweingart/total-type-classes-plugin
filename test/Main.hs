@@ -6,11 +6,13 @@
 module Main (main) where
 
 import Data.Proxy
-import TestModule
+import qualified Check
+import qualified TestModule
 
 main :: IO ()
 main = do
   --putStrLn $ testExposed (Proxy :: Proxy "testExposed")
   --putStrLn $ testExposedCall (Proxy :: Proxy "testExposedCall")
-  --testAll
+  Check.testAll
+  --TestModule.testAll
   return ()

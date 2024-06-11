@@ -7,6 +7,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Check where
 
@@ -35,6 +36,11 @@ instance C' (S Z) where
 
 instance C' n => C' (S (S n)) where
 
+class CNonTerm (n :: MyNat) where
+
+instance CNonTerm Z
+instance CNonTerm (S n) => CNonTerm (S n)
+
 -- $(mkEvidenceFun ''IsNat [True])
 
 -- $(mkEvidenceFun ''C [True, True])
@@ -46,3 +52,6 @@ instance TotalClass IsNat where
 
 instance TotalClass C' where
   totalityEvidence = checkTotality 
+
+--instance TotalClass CNonTerm where
+--  totalityEvidence = checkTotality 

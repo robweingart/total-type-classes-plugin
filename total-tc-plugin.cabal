@@ -72,7 +72,8 @@ library
         TotalClassPlugin.Rewriter.Utils,
         TotalClassPlugin.Rewriter.Env,
         TotalClassPlugin.Checker.Solve,
-        TotalClassPlugin.Checker.TH
+        TotalClassPlugin.Checker.TH,
+        TotalClassPlugin.Checker.Errors
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

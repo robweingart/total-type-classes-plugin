@@ -1,4 +1,4 @@
---{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
+{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -7,17 +7,19 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE RankNTypes #-}
 module TestModule 
 --  (testExposed, testExposedCall, testAll)
 where
---
---import Data.Proxy
---import TotalClassPlugin
---import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
---
---instance TotalClass KnownSymbol where
---  totalityEvidence = assertTotality
---
+import GHC.TypeLits (KnownSymbol)
+
+import Data.Proxy
+import TotalClassPlugin
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
+
+instance TotalClass KnownSymbol where
+  totalityEvidence = assertTotality
+
 ---- Function requiring rewrite
 --testSimple :: forall (s :: Symbol). Proxy s -> String
 --testSimple x = symbolVal x
@@ -168,6 +170,12 @@ where
 ----
 --testExpAppCall2 :: forall (s :: Symbol). Proxy s -> String
 --testExpAppCall2 x = testSimple @s x
+
+--testArgBeforeTy :: forall (s :: Symbol). () -> KnownSymbol s => Proxy s -> String
+--testArgBeforeTy () x = symbolVal x
+--
+--testArgBeforeTy' :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+--testArgBeforeTy' x = testArgBeforeTy () x
 --
 --testAll :: IO ()
 --testAll = do

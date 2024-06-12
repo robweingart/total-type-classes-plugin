@@ -29,7 +29,7 @@ import Data.Traversable (mapAccumM)
 
 rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteBinds binds cont = do
-  --outputFullTcM "Full before rewriteBinds: " binds
+  outputFullTcM "Full before rewriteBinds: " binds
   printLnTcM "rewriteBinds {"
   updateEnv <- newTcRef emptyDNameEnv
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds
@@ -231,6 +231,8 @@ rewriteHsWrapper wrapper = do
     [] -> return Nothing
     [[]] -> return Nothing
     [new_ev_vars] -> do
+      printLnTcM "Removing placeholders from wrapper: "
+      printWrapper 1 wrapper
       (tv, wrapper'') <- rewriteLastTyVar new_ev_vars wrapper'
       return $ Just (wrapper'', map evVarPred new_ev_vars, tv) 
     _ -> failTcM $ text "encountered multiple zonked WpLet, this should not happen"
@@ -259,7 +261,11 @@ isNotPlaceholder (EvBind {eb_lhs=evVar, eb_rhs=evTerm})
 
 rewriteLastTyVar :: [EvVar] -> HsWrapper -> TcM (TyVar, HsWrapper)
 rewriteLastTyVar ev_vars w = case go w of
-  (Nothing, _) -> failTcM (text "Wrapper has no WpTyLam" <+> ppr w)
+  (Nothing, _) -> do
+    printLnTcM "Rewrote wrapper with no TyLam"
+    printWrapper 1 w
+    outputTcM "TyCoVars: " vars
+    failTcM (text "Wrapper has no WpTyLam" <+> ppr w)
   (Just tv, w') -> return (tv, w')
   where
     vars = tyCoVarsOfTypes (map evVarPred ev_vars)

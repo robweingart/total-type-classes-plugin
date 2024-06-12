@@ -18,6 +18,7 @@ import Data.Data (Data, Typeable)
 import GHC.Data.Bag (Bag)
 import Data.Functor.Compose (Compose(Compose, getCompose))
 import Data.Generics (ext0)
+import GHC.Tc.Utils.TcType (evVarPred)
 
 withTcRef :: a -> (TcRef a -> TcM r) -> TcM (a, r)
 withTcRef initial f = do
@@ -74,6 +75,10 @@ printWrapper n w@(WpCast _) = output' n "WpCast" w
 printWrapper n w@(WpEvLam evvar) = do
   output' n "WpEvLam" w
   output' (n+1) "EvVar: " evvar
+  output' (n+1) "EvVar type: " $ evVarPred evvar
+  case evVarPred evvar of
+    TyConApp _ [TyVarTy var] -> output' (n+1) "var: " $ varUnique var
+    _ -> return ()
 printWrapper n w@(WpEvApp evterm) = do
   output' n "WpEvApp" w
   output' (n+1) "EvTerm: " evterm

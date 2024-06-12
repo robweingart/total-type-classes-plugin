@@ -210,7 +210,7 @@ rewriteWrapExpr updates outer = do
           printLnTcM "}"
           return $ Just expr'
 
-    go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe UpdateInfo)
+    go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe (UpdateInfo, Subst))
     go expr@(XExpr (WrapExpr (HsWrap wrap old_inner))) = do 
       outputTcM "XExpr WrapExpr { " expr 
       (wrap', (new_ev_apps, new_inner, maybe_update)) <- reskolemiseWrapper wrap $ do 
@@ -228,22 +228,24 @@ rewriteWrapExpr updates outer = do
           ])
       printLnTcM "}"
       return (new_expr, maybe_update)
-    go expr@(HsAppType ty (L loc old_inner) tok wc_type) = do
+    go expr@(HsAppType ty (L loc old_inner) tok wc_type) = setSrcSpanA loc $ do
       outputTcM "HsAppType { " expr 
       (new_inner, maybe_update) <- go old_inner
-      (new_ev_apps, maybe_update') <- maybe_mk_new (snd $ piResultTysSubst (hsExprType old_inner) [ty]) maybe_update
+      let subst = snd $ piResultTysSubst (hsExprType old_inner) [ty]
+      outputTcM "HsAppType subst: " subst
+      (new_ev_apps, maybe_update') <- maybe_mk_new subst maybe_update
       printLnTcM "}"
       return (mkHsWrap new_ev_apps $ HsAppType ty (L loc new_inner) tok wc_type, maybe_update')
-    go expr@(HsPar x l_tok (L loc old_inner) r_tok) = do
+    go expr@(HsPar x l_tok (L loc old_inner) r_tok) = setSrcSpanA loc $ do
       outputTcM "HsPar { " expr 
       (new_inner, maybe_update) <- go old_inner
       printLnTcM "}"
       return (HsPar x l_tok (L loc new_inner) r_tok, maybe_update)
     go expr@(HsVar x (L l var))
-      | Just update <- lookupDNameEnv updates $ varName var = do
+      | Just update <- lookupDNameEnv updates $ varName var = setSrcSpanA l $ do
         outputTcM "Updating type of occurrence: " expr
-        return ((HsVar x (L l (new_id update))), Just update)
-    go expr@(HsApp x (L l f) arg) = do
+        return ((HsVar x (L l (new_id update))), Just (update, emptySubst))
+    go expr@(HsApp x (L l f) arg) = setSrcSpanA l $ do
       outputTcM "HsApp {" expr
       (new_f, maybe_update) <- go f
       printLnTcM "}"
@@ -256,13 +258,21 @@ rewriteWrapExpr updates outer = do
       return (expr', Nothing)
 
     mk_ev_apps subst update = do
+      let vars = tyCoVarsOfTypes (new_theta update)
+      let unassigned_vars = filterVarSet (`notElemSubst` subst) vars
+      unless (isEmptyVarSet unassigned_vars) $ failTcM $ text "the following vars from the called function's type have not been applied at this insertion point:" <+> ppr unassigned_vars 
       let theta = substTheta subst (new_theta update)
+      outputTcM "Emitting new constraints due to call with update " update
+      outputTcM "New theta: " theta
       instCallConstraints (OccurrenceOf $ varName $ new_id update) theta
 
-    maybe_mk_new :: Subst -> Maybe UpdateInfo -> TcM (HsWrapper, Maybe UpdateInfo)
+    maybe_mk_new :: Subst -> Maybe (UpdateInfo, Subst) -> TcM (HsWrapper, Maybe (UpdateInfo,Subst))
     maybe_mk_new _ Nothing = return (WpHole, Nothing)
-    maybe_mk_new subst (Just update)
+    maybe_mk_new new_subst (Just (update, old_subst))
       | elemSubst (last_ty_var update) subst = do
         new_ev_apps <- mk_ev_apps subst update
         return (new_ev_apps, Nothing)
-      | otherwise = return (WpHole, Just update)
+      | otherwise = return (WpHole, Just (update, subst))
+      where
+        subst = unionSubst new_subst old_subst
+

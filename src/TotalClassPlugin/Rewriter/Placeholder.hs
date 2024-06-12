@@ -6,7 +6,7 @@ import Data.ByteString (ByteString)
 import Data.Maybe (isJust)
 
 placeholderString :: String
-placeholderString = "Total type class placeholder instance"
+placeholderString = "placeholder evaluated at runtime; this is a bug in TotalClassPlugin"
 
 placeholderBS :: ByteString
 placeholderBS = case mkLitString placeholderString of

@@ -44,6 +44,7 @@ type CheckTotalityResult :: forall {ck :: Data.Kind.Type}. ck -> Constraint
 class CheckTotalityResult (c :: ck) where
   isExhaustive :: Bool
   isTerminating :: Bool
+  isContextOk :: Bool
 
 --class IsClassKind ck => CheckTotality (c :: ck) where
 type CheckTotality :: forall {ck :: Data.Kind.Type}. ck -> Constraint

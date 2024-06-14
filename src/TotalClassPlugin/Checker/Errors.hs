@@ -9,26 +9,35 @@ import GHC.HsToCore.Errors.Types (ExhaustivityCheckType, MaxUncoveredPatterns, D
 import GHC (GhcTc)
 import GHC.Hs.Expr (HsMatchContext (..))
 import GHC.Tc.Utils.TcType (PatersonCondFailure, PatersonCondFailureContext)
-import GHC.Tc.Errors.Types (TcRnMessage (..), mkTcRnUnknownMessage, TcRnMessageDetailed (..), ErrInfo (..))
+import GHC.Tc.Errors.Types (TcRnMessage (..), mkTcRnUnknownMessage, TcRnMessageDetailed (..), ErrInfo (..), THError (ReportCustomQuasiError))
 import GHC.Tc.Types (TcRn, TcM)
-import GHC.Tc.Utils.Monad (addMessages, failWithTc)
+import GHC.Tc.Utils.Monad (addMessages, failWithTc, tryTc)
 import GHC.Utils.Error (Diagnostic (..), noHints, mkMessages, DecoratedSDoc (..))
 import GHC.Types.Error (mkSimpleDecorated, NoDiagnosticOpts (NoDiagnosticOpts), unionDecoratedSDoc, HasDefaultDiagnosticOpts (defaultOpts), MsgEnvelope (..), Messages (..), pprDiagnostic, defaultDiagnosticOpts)
-import GHC.Data.Bag (mapMaybeBag, headMaybe, mapBag, isEmptyBag, mapMaybeBagM)
+import GHC.Data.Bag (mapMaybeBag, headMaybe, mapBag, isEmptyBag, mapMaybeBagM, partitionBagWith)
 import GHC.Core.Class (Class (..))
 import TotalClassPlugin.Rewriter.Utils
+import Language.Haskell.TH (Q)
+import GHC.Tc.Gen.Splice (runQuasi)
 
 data TotalClassCheckerMessage = TotalNonExhaustive !(HsMatchContext GhcTc) !ExhaustivityCheckType !MaxUncoveredPatterns [Id] [Nabla]
                               | TotalNonTerminating TcRnMessage
+                              | TotalCheckerTHFailure String
+                              | TotalCheckerTHFatal THError
+                              | TotalCheckerInvalidContext Type PredType
                               | TotalError
 
 instance Diagnostic TotalClassCheckerMessage where
   type DiagnosticOpts TotalClassCheckerMessage = NoDiagnosticOpts
   diagnosticMessage _ = \case
     TotalNonExhaustive cxt flag max_p ids nablas ->
-      mkSimpleDecorated (text $ "Exhaustiveness check failed:") `unionDecoratedSDoc` diagnosticMessage NoDiagnosticOpts (DsNonExhaustivePatterns cxt flag max_p ids nablas)
+      mkSimpleDecorated (text "Exhaustiveness check failed:") `unionDecoratedSDoc` diagnosticMessage NoDiagnosticOpts (DsNonExhaustivePatterns cxt flag max_p ids nablas)
     TotalNonTerminating tc_msg ->
-      mkSimpleDecorated (text $ "Termination check failed:") `unionDecoratedSDoc` diagnosticMessage defaultOpts tc_msg
+      mkSimpleDecorated (text "Termination check failed:") `unionDecoratedSDoc` diagnosticMessage defaultOpts tc_msg
+    TotalCheckerTHFailure str ->
+      mkSimpleDecorated (text "Exhaustiveness check failed:" $$ text str)
+    TotalCheckerTHFatal err -> mkSimpleDecorated (text "Unexpected fatal error during exhaustiveness check code gen:") `unionDecoratedSDoc` diagnosticMessage defaultOpts (TcRnTHError err)
+    TotalCheckerInvalidContext tau pred_ty -> mkSimpleDecorated (text "Invalid constraint " <+> ppr pred_ty <+> text " in instance with head " <+> ppr tau)
     TotalError -> mkSimpleDecorated $ text "Unexpected error"
 
   diagnosticReason _ = ErrorWithoutFlag
@@ -37,6 +46,27 @@ instance Diagnostic TotalClassCheckerMessage where
 
 failWithTotal :: TotalClassCheckerMessage -> TcM a
 failWithTotal = failWithTc . mkTcRnUnknownMessage
+
+checkQuasiError :: Q a -> TcM (Either TotalClassCheckerMessage a)
+checkQuasiError thing_inside = do
+  (result, msgs) <- tryTc $ runQuasi thing_inside 
+  case result of
+    Just x -> return $ Right x
+    Nothing -> do
+      outputTcM "TH errors:" msgs
+      let (fatal, check_failure) = partitionBagWith get_th_msg $ mapMaybeBag get_th_error $ getMessages msgs
+      case (headMaybe fatal, headMaybe check_failure) of
+        (Nothing, Nothing) -> failWithTotal TotalError
+        (Just e, _) -> failWithTotal e
+        (Nothing, Just reason) -> return (Left reason)
+  where
+    get_th_error (MsgEnvelope{errMsgDiagnostic=tc_msg}) = case tc_msg of
+      TcRnTHError err -> Just err
+      (TcRnMessageWithInfo _ (TcRnMessageDetailed _ (TcRnTHError err))) -> Just err
+      _ -> Nothing
+
+    get_th_msg (ReportCustomQuasiError True str) = Right (TotalCheckerTHFailure str)
+    get_th_msg e = Left (TotalCheckerTHFatal e)
 
 checkTcRnResult :: TcRn (Maybe a, Messages TcRnMessage) -> TcRn a
 checkTcRnResult thing_inside = do

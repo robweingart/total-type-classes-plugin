@@ -9,51 +9,53 @@ import GHC.Tc.Gen.Splice (runQuasi)
 import GHC.HsToCore.Expr (dsExpr)
 import GHC.ThToHs (convertToHsExpr)
 
-mkEvidenceFun :: Name -> [Bool] -> Q [Dec]
-mkEvidenceFun name match_on = do
-  let args = VarT . mkName . ("a" ++) . show <$> [1..length match_on]
-  ty <- reifyType name
+mkEvidenceFun :: Name -> Int -> Q [Dec]
+mkEvidenceFun name arity = do
+  let args = VarT . mkName . ("a" ++) . show <$> [1..arity]
+  --ty <- reifyType name
+  
   insts <- reifyInstances name args
-  clauses <- mapM (mkInstClause match_on) insts
+  clauses <- mapM mkInstClause insts
   let fun_name = mkName ("evidenceFun" ++ nameBase name)
-  fun_type <- mk_type match_on ty
-  return [SigD fun_name fun_type, FunD fun_name clauses]
-  where
-    unit_type = [t| () |]
-   
-    unit_unless True x = return x
-    unit_unless False _ = unit_type
+  --fun_type <- mk_type ty
+  return [FunD fun_name clauses]
+  --where
+    --unit_type = [t| () |]
 
-    mk_type bs (ForallT bndrs [] ty') = ForallT bndrs [] <$> mk_type bs ty'
-    mk_type bs (ForallVisT bndrs ty') = ForallVisT bndrs <$> mk_type bs ty'
-    mk_type (b : bs) (AppT (AppT f x) y)
-      | ArrowT <- f = do 
-        x' <- unit_unless b x
-        y' <- mk_type bs y
-        return $ (AppT (AppT f x') y')
-      | MulArrowT <- f = do
-        x' <- unit_unless b x
-        y' <- mk_type bs y
-        return $ (AppT (AppT f x') y')
-    mk_type [] ConstraintT = unit_type
-    mk_type _ _ = fail "invalid class constructor type"
+    --mk_type (ForallT bndrs [] ty') = ForallT bndrs [] <$> mk_type ty'
+    --mk_type (ForallVisT bndrs ty') = ForallVisT bndrs <$> mk_type ty'
+    --mk_type (AppT (AppT f x) y)
+    --  | ArrowT <- f = do 
+    --    x' <- demoteArgType x
+    --    y' <- mk_type y
+    --    return $ (AppT (AppT f x') y')
+    --  | MulArrowT <- f = do
+    --    x' <- demoteArgType x
+    --    y' <- mk_type y
+    --    return $ (AppT (AppT f x') y')
+    --mk_type ConstraintT = unit_type
+    --mk_type _ = fail "invalid class constructor type"
 
-mkInstClause :: [Bool] -> InstanceDec -> Q Clause
-mkInstClause match_on (InstanceD _ _ t _) = do
+--demoteArgType :: Type -> Q Type
+--demoteArgType ty = go ty []
+--  where
+--    go (VarT name) [] = return $ VarT name
+--    go (AppT f x) args = go f (demoteArgType x : args)
+--    go (PromotedT name) args = return $ ConT
+
+mkInstClause :: InstanceDec -> Q Clause
+mkInstClause (InstanceD _ _ t _) = do
   let args = get_args t []
-  pats <- demoteToPats match_on args
+  pats <- demoteToPats args
   body <- [| () |]
   return $ Clause pats (NormalB body) []
   where
     get_args (AppT f x) args = get_args f (x : args) 
     get_args _ args = args
-mkInstClause _ _ = fail "Not an instance"
+mkInstClause _ = fail "Not an instance"
 
-demoteToPats :: [Bool] -> [Type] -> Q [Pat]
-demoteToPats [] [] = return []
-demoteToPats (True : bs) (t : ts) = liftA2 (:) (demoteToPat t) (demoteToPats bs ts)
-demoteToPats (False : bs) (_ : ts) = (WildP :) <$> demoteToPats bs ts
-demoteToPats _ _ = fail "wrong arity"
+demoteToPats :: [Type] -> Q [Pat]
+demoteToPats ts = mapM demoteToPat ts
 
 demoteToPat :: Type -> Q Pat
 demoteToPat t = go t []

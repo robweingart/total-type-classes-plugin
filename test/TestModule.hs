@@ -40,13 +40,13 @@ testExposedCall x = testSimple x
 --testTransExposedCall :: forall (s :: Symbol). Proxy s -> String 
 --testTransExposedCall x = testSimple x
 --
----- Call to rewritten function, caller already has constraint
---testCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
---testCall1 x = testSimple x
---
----- Call to rewritten function, caller will also need rewrite
---testCall2 :: forall (s :: Symbol). Proxy s -> String 
---testCall2 x = testSimple x
+-- Call to rewritten function, caller already has constraint
+testCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
+testCall1 x = testSimple x
+
+-- Call to rewritten function, caller will also need rewrite
+testCall2 :: forall (s :: Symbol). Proxy s -> String 
+testCall2 x = testSimple x
 --
 -- Multiple uses of the same missing constraint
 testSimples1 :: forall (s :: Symbol). Proxy s -> String 
@@ -111,8 +111,8 @@ testCalls'4 x y = testSimples4 x y
 testCalls'5 :: forall (s1 :: Symbol) (s2 :: Symbol). (KnownSymbol s1, KnownSymbol s2) => Proxy s1 -> Proxy s2 -> String 
 testCalls'5 x y = testSimples5 x y
 
---testCalls'6 :: forall (s1 :: Symbol) (s2 :: Symbol). (KnownSymbol s1, KnownSymbol s2) => Proxy s1 -> Proxy s2 -> String 
---testCalls'6 x y = testSimples6 x y
+testCalls'6 :: forall (s1 :: Symbol) (s2 :: Symbol). (KnownSymbol s1, KnownSymbol s2) => Proxy s1 -> Proxy s2 -> String 
+testCalls'6 x y = testSimples6 x y
 --
 ---- One constraint already provided, but in a weird place
 --testWeirdOrderSimples :: forall (s1 :: Symbol). KnownSymbol s1 => forall (s2 :: Symbol). Proxy s1 -> Proxy s2 -> String
@@ -261,14 +261,14 @@ testAll :: IO ()
 testAll = do
   putStrLn $ testBaseline (Proxy :: Proxy "testBaseline")
   putStrLn $ testSimple (Proxy :: Proxy "testSimple")
---  putStrLn $ testCall1 (Proxy :: Proxy "testCall1") 
---  putStrLn $ testCall2 (Proxy :: Proxy "testCall2") 
+  putStrLn $ testCall1 (Proxy :: Proxy "testCall1") 
+  putStrLn $ testCall2 (Proxy :: Proxy "testCall2") 
   putStrLn $ testSimples1 (Proxy :: Proxy "testSimples1") 
   putStrLn $ testSimples2 (Proxy :: Proxy "testSimples2") 
   putStrLn $ testSimples3 (Proxy :: Proxy "testSimples3 arg 1,") (Proxy :: Proxy "testSimples3 arg 2") 
   putStrLn $ testSimples4 (Proxy :: Proxy "testSimples4 arg 1,") (Proxy :: Proxy "testSimples4 arg 2") 
   putStrLn $ testSimples5 (Proxy :: Proxy "testSimples5 arg 1,") (Proxy :: Proxy "testSimples5 arg 2") 
-  --putStrLn $ testSimples6 (Proxy :: Proxy "testSimples6 arg 1,") (Proxy :: Proxy "testSimples6 arg 2") 
+  putStrLn $ testSimples6 (Proxy :: Proxy "testSimples6 arg 1,") (Proxy :: Proxy "testSimples6 arg 2") 
   putStrLn $ testCalls1 (Proxy :: Proxy "testCalls1") 
   putStrLn $ testCalls2 (Proxy :: Proxy "testCalls2") 
   putStrLn $ testCalls3 (Proxy :: Proxy "testCalls3 arg 1,") (Proxy :: Proxy "testCalls3 arg 2") 
@@ -280,7 +280,7 @@ testAll = do
   putStrLn $ testCalls'3 (Proxy :: Proxy "testCalls'3 arg 1,") (Proxy :: Proxy "testCalls'3 arg 2") 
   putStrLn $ testCalls'4 (Proxy :: Proxy "testCalls'4 arg 1,") (Proxy :: Proxy "testCalls'4 arg 2") 
   putStrLn $ testCalls'5 (Proxy :: Proxy "testCalls'5 arg 1,") (Proxy :: Proxy "testCalls'5 arg 2") 
-  --putStrLn $ testCalls'6 (Proxy :: Proxy "testCalls'6 arg 1,") (Proxy :: Proxy "testCalls'6 arg 2") 
+  putStrLn $ testCalls'6 (Proxy :: Proxy "testCalls'6 arg 1,") (Proxy :: Proxy "testCalls'6 arg 2") 
 --  putStrLn $ testWeirdOrderSimples (Proxy :: Proxy "testWeirdOrderSimples arg 1,") (Proxy :: Proxy "testWeirdOrderSimples arg 2")
 --  putStrLn $ testWeirdOrderCalls1 (Proxy :: Proxy "testWeirdOrderCalls1 arg 1,") (Proxy :: Proxy "testWeirdOrderCalls1 arg 2")
 --  putStrLn $ testWeirdOrderCalls2 (Proxy :: Proxy "testWeirdOrderCalls2 arg 1,") (Proxy :: Proxy "testWeirdOrderCalls2 arg 2")

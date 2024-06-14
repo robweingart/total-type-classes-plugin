@@ -200,6 +200,8 @@ hsWrapperTypeSubst wrap ty = prTypeType $ go wrap (ty, [], empty_subst)
     go (WpLet _)       = id
     go (WpMultCoercion _)  = id
 
+newtype M' m x = M' { unM' :: x -> m x }
+
 extM' :: (Typeable a, Typeable b) => (a -> m a) -> (b -> m b) -> a -> m a
 extM' def ext = unM' ((M' def) `ext0` (M' ext))
 
@@ -214,5 +216,3 @@ mkMMaybe f = getCompose . extM' (\_ -> Compose (return Nothing)) (Compose . f)
 
 orReturn :: Monad m => (a -> m (Maybe a)) -> a -> m a
 orReturn f x = orElseM (f x) (return x)
-
-newtype M' m x = M' { unM' :: x -> m x }

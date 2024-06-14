@@ -233,7 +233,8 @@ rewriteHsWrapper wrapper = do
     [new_ev_vars] -> do
       printLnTcM "Removing placeholders from wrapper: "
       printWrapper 1 wrapper
-      (tv, wrapper'') <- rewriteLastTyVar new_ev_vars wrapper'
+      target_tv <- findLastTyLamOfSet (tyCoVarsOfTypes $ map evVarPred new_ev_vars) wrapper'
+      (tv, wrapper'') <- rewriteLastTyLamAfter new_ev_vars target_tv wrapper'
       return $ Just (wrapper'', map evVarPred new_ev_vars, tv) 
     _ -> failTcM $ text "encountered multiple zonked WpLet, this should not happen"
   --printLnTcM "}"
@@ -259,23 +260,50 @@ isNotPlaceholder (EvBind {eb_lhs=evVar, eb_rhs=evTerm})
     return False
   | otherwise = return True
 
-rewriteLastTyVar :: [EvVar] -> HsWrapper -> TcM (TyVar, HsWrapper)
-rewriteLastTyVar ev_vars w = case go w of
-  (Nothing, _) -> do
+data RewriteState = NotFound | FoundVar TyVar | RewriteDone TyVar
+
+findLastTyLamOfSet :: TyCoVarSet -> HsWrapper -> TcM TyVar
+findLastTyLamOfSet vars w = case go w of
+  Nothing -> do
     printLnTcM "Rewrote wrapper with no TyLam"
     printWrapper 1 w
     outputTcM "TyCoVars: " vars
     failTcM (text "Wrapper has no WpTyLam" <+> ppr w)
-  (Just tv, w') -> return (tv, w')
+  Just tv -> return tv
   where
-    vars = tyCoVarsOfTypes (map evVarPred ev_vars)
     go (WpCompose w1 w2) = case go w2 of
-      (Nothing, w2') -> let (tv, w1') = go w1 in (tv, w1' <.> w2')
-      (Just tv, w2') -> (Just tv, w1 <.> w2')
-    go (WpTyLam tv) = if tv `elemVarSet` vars then (Just tv, WpTyLam tv <.> foldr ((<.>) . WpEvLam) WpHole ev_vars) else (Nothing, WpTyLam tv)
-    go (WpFun w1 w2 args) = let (tv, w2') = go w2 in (tv, WpFun w1 w2' args)
-    go w' = (Nothing, w')
+      Nothing -> go w1
+      Just tv -> Just tv
+    go (WpTyLam tv) = if tv `elemVarSet` vars then Just tv else Nothing
+    go (WpFun _ w2 _) = go w2
+    go _ = Nothing
 
+rewriteLastTyLamAfter :: [EvVar] -> TyVar -> HsWrapper -> TcM (TyVar, HsWrapper)
+rewriteLastTyLamAfter ev_vars target_tv w = case go w NotFound of
+  Left NotFound -> failTcM (text "Couldn't find the target type var" <+> ppr w)
+  Left (FoundVar tv) -> return (tv, w <.> rewrite WpHole)
+  Left (RewriteDone _) -> failTcM (text "Impossible")
+  Right (tv, w') -> return (tv, w')
+  where
+    go :: HsWrapper -> RewriteState -> Either RewriteState (TyVar, HsWrapper)
+    go _ (RewriteDone tv) = Left (RewriteDone tv)
+    go (WpCompose w1 w2) s = case go w1 s of
+      Left s' -> case go w2 s' of
+        Left s'' -> Left s''
+        Right (tv, w2') -> Right (tv, w1 <.> w2')
+      Right (tv, w1') -> Right (tv, w1' <.> w2)
+    go (WpTyLam tv) NotFound = if tv == target_tv then Left (FoundVar tv) else Left NotFound
+    go (WpTyLam tv) (FoundVar _) = Left (FoundVar tv)
+    go (WpFun w1 w2 args) s = case go w2 s of
+      Left (FoundVar tv) -> Right (tv, WpFun w1 (w2 <.> rewrite WpHole) args)
+      Left s' -> Left s'
+      Right (tv, w2') -> Right (tv, WpFun w1 w2' args)
+    go _ NotFound = Left NotFound
+    go w' (FoundVar tv) = Right (tv, rewrite w')
+
+    rewrite w' = foldr ((<.>) . WpEvLam) w' ev_vars
+
+--(Just tv, WpTyLam tv <.> foldr ((<.>) . WpEvLam) WpHole ev_vars)
 checkDoneLHsBind :: LHsBind GhcTc -> TcM (LHsBind GhcTc)
 checkDoneLHsBind = wrapLocMA checkDoneHsBind
 

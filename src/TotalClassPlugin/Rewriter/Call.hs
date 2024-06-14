@@ -213,13 +213,14 @@ rewriteWrapExpr updates outer = do
     go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe (UpdateInfo, Subst))
     go expr@(XExpr (WrapExpr (HsWrap wrap old_inner))) = do 
       outputTcM "XExpr WrapExpr { " expr 
+      outputTcM "old type:" $ hsExprType expr
       (wrap', (new_ev_apps, new_inner, maybe_update)) <- reskolemiseWrapper wrap $ do 
         (new_inner, maybe_update) <- go old_inner
         let subst = snd $ hsWrapperTypeSubst wrap (hsExprType old_inner)
         outputTcM "WrapExpr subst: " subst
         (new_ev_apps, maybe_update') <- maybe_mk_new subst maybe_update
         return (new_ev_apps, new_inner, maybe_update')
-      let new_wrap = new_ev_apps <.> wrap'
+      new_wrap <- maybe_add_to_first_ty_app wrap' new_ev_apps
       let new_expr = XExpr (WrapExpr (HsWrap new_wrap new_inner))
       unless (isJust maybe_update || hsExprType expr `eqType` hsExprType new_expr) $
         failTcM $ text "Type still different after update:" <+> (vcat $
@@ -257,22 +258,40 @@ rewriteWrapExpr updates outer = do
         failTcM $ text "Inner type is not a changed id, but its type changed " <+> ppr expr'
       return (expr', Nothing)
 
-    mk_ev_apps subst update = do
-      let vars = tyCoVarsOfTypes (new_theta update)
-      let unassigned_vars = filterVarSet (`notElemSubst` subst) vars
-      unless (isEmptyVarSet unassigned_vars) $ failTcM $ text "the following vars from the called function's type have not been applied at this insertion point:" <+> ppr unassigned_vars 
-      let theta = substTheta subst (new_theta update)
-      outputTcM "Emitting new constraints due to call with update " update
-      outputTcM "New theta: " theta
-      instCallConstraints (OccurrenceOf $ varName $ new_id update) theta
+mk_ev_apps :: Subst -> UpdateInfo -> TcM HsWrapper
+mk_ev_apps subst update = do
+  let vars = tyCoVarsOfTypes (new_theta update)
+  let unassigned_vars = filterVarSet (`notElemSubst` subst) vars
+  unless (isEmptyVarSet unassigned_vars) $ failTcM $ text "the following vars from the called function's type have not been applied at this insertion point:" <+> ppr unassigned_vars 
+  let theta = substTheta subst (new_theta update)
+  outputTcM "Emitting new constraints due to call with update " update
+  outputTcM "New theta: " theta
+  instCallConstraints (OccurrenceOf $ varName $ new_id update) theta
 
-    maybe_mk_new :: Subst -> Maybe (UpdateInfo, Subst) -> TcM (HsWrapper, Maybe (UpdateInfo,Subst))
-    maybe_mk_new _ Nothing = return (WpHole, Nothing)
-    maybe_mk_new new_subst (Just (update, old_subst))
-      | elemSubst (last_ty_var update) subst = do
-        new_ev_apps <- mk_ev_apps subst update
-        return (new_ev_apps, Nothing)
-      | otherwise = return (WpHole, Just (update, subst))
-      where
-        subst = unionSubst new_subst old_subst
+maybe_mk_new :: Subst -> Maybe (UpdateInfo, Subst) -> TcM (HsWrapper, Maybe (UpdateInfo,Subst))
+maybe_mk_new _ Nothing = return (WpHole, Nothing)
+maybe_mk_new new_subst (Just (update, old_subst))
+  | elemSubst (last_ty_var update) subst = do
+    new_ev_apps <- mk_ev_apps subst update
+    return (new_ev_apps, Nothing)
+  | otherwise = return (WpHole, Just (update, subst))
+  where
+    subst = unionSubst new_subst old_subst
+
+maybe_add_to_first_ty_app :: HsWrapper -> HsWrapper -> TcM HsWrapper
+maybe_add_to_first_ty_app wrap WpHole = return wrap
+maybe_add_to_first_ty_app wrap new_wrap = case go wrap of
+  Nothing -> failTcM $ text "Couldn't find WpTyApp in call site wrapper"
+  Just wrap' -> do
+    printLnTcM "Rewrote:"
+    printWrapper 1 wrap
+    printLnTcM "to:"
+    printWrapper 1 wrap'
+    return wrap'
+  where
+    go (WpCompose w1 w2) = case go w1 of
+      Nothing -> fmap (w1 <.>) $ go w2
+      Just w1' -> Just (w1' <.> w2)
+    go w@(WpTyApp _) = Just (new_wrap <.> w)
+    go _ = Nothing
 

@@ -50,7 +50,6 @@ getTotalityEvidenceType = do
 solveCheck :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
 solveCheck ct = case classifyPredType (ctPred ct) of
   ClassPred targetClass tys -> do
-    tcPluginIO $ putStrLn "checking for CheckTotality"
     checkClass <- getCheckClass
     checkResultClass <- getCheckResultClass
     let maybe_get_result = if | targetClass == checkClass -> Just False

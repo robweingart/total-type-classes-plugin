@@ -34,13 +34,10 @@ rewriteCalls :: UpdateEnv -> LHsBinds GhcTc -> (LHsBinds GhcTc -> TcM (TcGblEnv,
 rewriteCalls ids binds cont
   | isEmptyDNameEnv ids = do
     printLnTcM "No new modified ids, ending loop"
-    --outputFullTcM "Full at end: " binds
     getEnvs
   | otherwise = do
-    --outputFullTcM "Full before rewriteCalls: " binds
     forM_ ids (outputTcM "")
     (binds', lie) <- captureTopConstraints $ rewriteCallsIn ids binds
-    --outputTcM "Captured constraints:" lie
     (gbl, lcl) <- getEnvs
     new_ev_binds <- restoreEnvs (gbl, lcl) $ simplifyTop lie
     when (any (isPlaceholder . eb_rhs) new_ev_binds) $ failTcM $ text "Placeholder leaked into global constraints" <+> ppr new_ev_binds
@@ -69,12 +66,10 @@ reskolemise [] [] thing_inside = do
     res <- thing_inside
     return (emptyTcEvBinds, res)
 reskolemise tvs given thing_inside = do
-    printLnTcM "reskolemise {"
     (new_ev_binds, result) <- 
       checkConstraints (UnkSkol emptyCallStack) tvs given $
       tcExtendNameTyVarEnv (mkTyVarNamePairs tvs) $
       thing_inside
-    outputTcM "} New ev binds:" new_ev_binds
     return (new_ev_binds, result)
 
 reskolemiseWrapper :: HsWrapper -> TcM result -> TcM (HsWrapper, result)
@@ -82,13 +77,9 @@ reskolemiseWrapper WpHole thing_inside = do
   result <- thing_inside
   return (WpHole, result)
 reskolemiseWrapper wrap thing_inside = do
-  printLnTcM "reskolemiseWrapper {"
   (tvs, given) <- wrapperLams wrap
-  printWrapper 1 wrap
   (new_ev_binds, result) <- reskolemise tvs given thing_inside
   new_wrap <- addToWpLet new_ev_binds wrap
-  printLnTcM "} New wrapper:"
-  printWrapper 1 new_wrap
   return (new_wrap, result)
 
 addToWpLet :: TcEvBinds -> HsWrapper -> TcM HsWrapper 
@@ -136,11 +127,7 @@ noRewriteLVar updates = wrapLocMA (noRewriteVar updates)
 noRewriteVar :: UpdateEnv -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
 noRewriteVar updates expr@(HsVar _ (L _ var))
   | Just _ <- lookupDNameEnv updates (varName var) = failTcM $ text "call to modified function " <+> ppr expr <+> text " is not immediate child of a wrapper"
-  | otherwise = do
-    outputTcM "noRewriteVar unique: " $ varUnique var
-    outputTcM "noRewriteVar updates: " updates
-    outputTcM "noRewriteVar ok: " expr
-    return expr
+  | otherwise = return expr
 noRewriteVar _ expr = do
   return expr
 
@@ -154,20 +141,14 @@ rewriteLHsBind updates = wrapLocMMaybeA (rewriteHsBind updates)
 
 rewriteHsBind :: UpdateEnv -> HsBind GhcTc -> TcM (Maybe (HsBind GhcTc))
 rewriteHsBind ids b@(FunBind {fun_matches=matches, fun_ext=(wrap, ctick)}) = do
-  printLnTcM "rewriteHsBind (FunBind) {"
-  outputTcM "Rewriting calls in bind: " b
-  --outputTcM "Wraps: " $ snd $ runState (everywhereM (mkM recordXExpr) matches) []
   (wrap', matches') <- reskolemiseWrapper wrap $ rewriteCallsIn ids matches
-  printLnTcM "}"
   return $ Just b{fun_matches=matches', fun_ext=(wrap', ctick)}
-rewriteHsBind ids b@(XHsBindsLR (AbsBinds { abs_tvs=tvs
+rewriteHsBind ids (XHsBindsLR (AbsBinds { abs_tvs=tvs
                                           , abs_ev_vars=ev_vars
                                           , abs_exports=exports
                                           , abs_ev_binds=ev_binds
                                           , abs_binds=binds
                                           , abs_sig=sig })) = do
-  printLnTcM "rewriteHsBind (AbsBinds) {"
-  outputTcM "Rewriting calls in bind: " b
   (new_ev_binds, binds') <- reskolemise tvs ev_vars $ mapM (orReturn (rewriteLHsBind ids)) binds
   ev_binds' <- case ev_binds of
     [] -> return [new_ev_binds]
@@ -178,7 +159,6 @@ rewriteHsBind ids b@(XHsBindsLR (AbsBinds { abs_tvs=tvs
       local_ev_binds' <- addToTcEvBinds local_ev_binds new_ev_binds
       return [dfun_ev_binds, local_ev_binds']
     _ -> failTcM $ text "Reskolemised AbsBinds with more than two abs_ev_binds"
-  printLnTcM "}"
   return $ Just $ XHsBindsLR (AbsBinds { abs_tvs=tvs
                                        , abs_ev_vars=ev_vars
                                        , abs_exports=exports
@@ -200,25 +180,19 @@ rewriteWrapExpr updates outer = do
     _ -> return Nothing
   where
     go_outer = do
-      outputFullTcM "Inspecting wrapped expression {" outer
       let old_ty = hsExprType outer
       (expr', maybe_update) <- go outer
       let new_ty = hsExprType expr'
       case (old_ty `eqType` new_ty, maybe_update) of
         (False, Nothing) -> failTcM $ text "no update but inner type changed " <+> ppr new_ty
         (_, Just _) -> failTcM $ text "update not resolved"
-        (True, Nothing) -> do
-          printLnTcM "}"
-          return $ Just expr'
+        (True, Nothing) -> return (Just expr')
 
     go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe (UpdateInfo, Subst))
     go expr@(XExpr (WrapExpr (HsWrap wrap old_inner))) = do 
-      outputTcM "XExpr WrapExpr { " expr 
-      outputTcM "old type:" $ hsExprType expr
       (wrap', (new_ev_apps, new_inner, maybe_update)) <- reskolemiseWrapper wrap $ do 
         (new_inner, maybe_update) <- go old_inner
         let subst = snd $ hsWrapperTypeSubst wrap (hsExprType old_inner)
-        outputTcM "WrapExpr subst: " subst
         (new_ev_apps, maybe_update') <- maybe_mk_new subst maybe_update
         return (new_ev_apps, new_inner, maybe_update')
       new_wrap <- maybe_add_to_first_ty_app wrap' new_ev_apps
@@ -228,32 +202,22 @@ rewriteWrapExpr updates outer = do
           [ text "old:" <+> ppr (hsExprType expr)
           , text "new:" <+> ppr (hsExprType new_expr)
           ])
-      printLnTcM "}"
       return (new_expr, maybe_update)
-    go expr@(HsAppType ty (L loc old_inner) tok wc_type) = setSrcSpanA loc $ do
-      outputTcM "HsAppType { " expr 
+    go (HsAppType ty (L loc old_inner) tok wc_type) = setSrcSpanA loc $ do
       (new_inner, maybe_update) <- go old_inner
       let subst = snd $ piResultTysSubst (hsExprType old_inner) [ty]
-      outputTcM "HsAppType subst: " subst
       (new_ev_apps, maybe_update') <- maybe_mk_new subst maybe_update
-      printLnTcM "}"
       return (mkHsWrap new_ev_apps $ HsAppType ty (L loc new_inner) tok wc_type, maybe_update')
-    go expr@(HsPar x l_tok (L loc old_inner) r_tok) = setSrcSpanA loc $ do
-      outputTcM "HsPar { " expr 
+    go (HsPar x l_tok (L loc old_inner) r_tok) = setSrcSpanA loc $ do
       (new_inner, maybe_update) <- go old_inner
-      printLnTcM "}"
       return (HsPar x l_tok (L loc new_inner) r_tok, maybe_update)
-    go expr@(HsVar x (L l var))
+    go (HsVar x (L l var))
       | Just update <- lookupDNameEnv updates $ varName var = setSrcSpanA l $ do
-        outputTcM "Updating type of occurrence: " expr
         return ((HsVar x (L l (new_id update))), Just (update, emptySubst))
-    go expr@(HsApp x (L l f) arg) = setSrcSpanA l $ do
-      outputTcM "HsApp {" expr
+    go (HsApp x (L l f) arg) = setSrcSpanA l $ do
       (new_f, maybe_update) <- go f
-      printLnTcM "}"
       return (HsApp x (L l new_f) arg, maybe_update)
     go expr = do
-      outputTcM "Reached non-wrapper expr " expr
       expr' <- rewriteCallsIn updates expr
       unless (hsExprType expr `eqType` hsExprType expr') $
         failTcM $ text "Inner type is not a changed id, but its type changed " <+> ppr expr'
@@ -265,8 +229,6 @@ mk_ev_apps subst update = do
   let unassigned_vars = filterVarSet (`notElemSubst` subst) vars
   unless (isEmptyVarSet unassigned_vars) $ failTcM $ text "the following vars from the called function's type have not been applied at this insertion point:" <+> ppr unassigned_vars 
   let theta = substTheta subst (new_theta update)
-  outputTcM "Emitting new constraints due to call with update " update
-  outputTcM "New theta: " theta
   instCallConstraints (OccurrenceOf $ varName $ new_id update) theta
 
 maybe_mk_new :: Subst -> Maybe (UpdateInfo, Subst) -> TcM (HsWrapper, Maybe (UpdateInfo,Subst))
@@ -283,12 +245,7 @@ maybe_add_to_first_ty_app :: HsWrapper -> HsWrapper -> TcM HsWrapper
 maybe_add_to_first_ty_app wrap WpHole = return wrap
 maybe_add_to_first_ty_app wrap new_wrap = case go wrap of
   Nothing -> failTcM $ text "Couldn't find WpTyApp in call site wrapper"
-  Just wrap' -> do
-    printLnTcM "Rewrote:"
-    printWrapper 1 wrap
-    printLnTcM "to:"
-    printWrapper 1 wrap'
-    return wrap'
+  Just wrap' -> return wrap'
   where
     go (WpCompose w1 w2) = case go w1 of
       Nothing -> fmap (w1 <.>) $ go w2

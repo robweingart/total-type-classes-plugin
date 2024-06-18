@@ -29,12 +29,8 @@ import Data.Traversable (mapAccumM)
 
 rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteBinds binds cont = do
-  outputFullTcM "Full before rewriteBinds: " binds
-  printLnTcM "rewriteBinds {"
   updateEnv <- newTcRef emptyDNameEnv
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds
-  --printLnTcM "Starting second pass"
-  --binds'' <- everywhereM (mkM (rewriteFunBind updateEnv)) binds'
   printLnTcM "Finished rewriteBinds pass, checking for remaining placeholders"
   _ <- everywhereM (mkM checkDoneLHsBind) binds'
   _ <- everywhereM (mkM checkDoneHsLocalBinds) binds'
@@ -44,7 +40,6 @@ rewriteBinds binds cont = do
   when (any (isPlaceholder . eb_rhs) top_ev_binds) $ failTcM $ text "Found placeholder in top-level ev binds: " <+> ppr top_ev_binds
   updates <- readTcRef updateEnv
   updGblEnv (\gbl -> gbl{tcg_binds=binds'}) $ tcExtendGlobalEnvImplicit (map (AnId . new_id) $ toList updates) $ do
-    printLnTcM "}"
     cont updates binds'
 
 rewriteLHsBind :: TcRef UpdateEnv -> LHsBind GhcTc -> TcM (LHsBind GhcTc)
@@ -58,36 +53,12 @@ rewriteXHsBindsLR updateEnv (XHsBindsLR (AbsBinds { abs_tvs=tvs
                                                   , abs_binds=inner_binds
                                                   , abs_sig=sig })) = do --printLnTcM "rewriteXHsBindsLR {"
   newUpdateEnv <- newTcRef emptyDNameEnv
-  --printLnTcM "Before:"
-  --outputTcM "abs_tvs:" tvs
-  --outputTcM "abs_ev_vars:" ev_vars
-  --outputTcM "abs_ev_binds:" ev_binds
-  --printLnTcM "Exports of this AbsBinds:"
-  --forM_ exports $ \ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} -> do
-  --  outputTcM "Mono id:" mono
-  --  outputTcM "Mono type:" $ idType mono
-  --  outputTcM "Poly id:" poly
-  --  outputTcM "Poly type:" $ idType poly
-  --  printLnTcM "Wrapper:"
-  --  printWrapper 1 wrap
   inner_binds' <- mapM (wrapLocMA (rewriteFunBind newUpdateEnv)) inner_binds
   (added_ev_vars, ev_binds') <- mapAccumM rewrite_ev_binds [] ev_binds
   exports' <- mapM (rewriteABExport newUpdateEnv tvs ev_vars added_ev_vars) exports
   let ev_vars' = added_ev_vars ++ ev_vars
   newUpdates <- readTcRef newUpdateEnv
   updTcRef updateEnv (plusUDFM newUpdates)
-  --printLnTcM "}"
-  --printLnTcM "After:"
-  --outputTcM "abs_ev_vars:" ev_vars'
-  --outputTcM "abs_ev_binds:" ev_binds'
-  --printLnTcM "Exports of this AbsBinds:"
-  --forM_ exports' $ \ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} -> do
-  --  outputTcM "Mono id:" mono
-  --  outputTcM "Mono type:" $ idType mono
-  --  outputTcM "Poly id:" poly
-  --  outputTcM "Poly type:" $ idType poly
-  --  printLnTcM "Wrapper:"
-  --  printWrapper 1 wrap
   return $ XHsBindsLR (AbsBinds { abs_tvs=tvs
                                 , abs_ev_vars=ev_vars'
                                 , abs_exports=exports'
@@ -97,10 +68,6 @@ rewriteXHsBindsLR updateEnv (XHsBindsLR (AbsBinds { abs_tvs=tvs
   where
     rewrite_ev_binds vars ebs = do
       (ev_vars', ev_binds') <- rewriteTcEvBinds ebs
-      unless (null ev_vars') $ do
-        outputTcM "Encountered placeholder in abs_ev_binds:" ev_binds
-        outputTcM "Rewrite result:" ev_binds'
-        outputTcM "Introduced ev vars:" ev_vars'
       return (vars ++ ev_vars', ev_binds')
   
 rewriteXHsBindsLR _ b = return b
@@ -109,10 +76,7 @@ rewriteABExport :: TcRef UpdateEnv -> [TyVar] -> [EvVar] -> [EvVar] -> ABExport 
 rewriteABExport updateEnv tvs old_ev_vars added_ev_vars e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = do
   (new_mono, update_from_mono) <- do_mono_update
   let binders = mkTyVarBinders InferredSpec tvs
-  outputTcM "ABExport: " e
-  outputTcM "Adding foralls:" binders
   let theta = map evVarPred (added_ev_vars ++ old_ev_vars)
-  outputTcM "Adding theta:" theta
   let new_poly = setVarType poly $
                  mkInvisForAllTys binders $
                  mkPhiTy theta $
@@ -159,13 +123,6 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
     (Nothing, _) -> return b
     (_, Nothing) -> failTcM $ text "Failed to unify fun type"
     (Just (wrapper', theta, last_tv), Just subst) -> do
-      dFlags <- getDynFlags
-      printLnTcM $ "rewriteFunBind " ++ (showSDoc dFlags $ ppr fid) ++ " {"
-      printLnTcM "old wrapper: "
-      printWrapper 1 wrapper
-      printLnTcM "new wrapper: "
-      printWrapper 1 wrapper'
-      outputTcM "Substitution: " subst
       let theta' = substTheta subst theta
       last_tv' <- case substTyVar subst last_tv of
         TyVarTy tv -> return tv
@@ -174,17 +131,7 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
       new_ty <- copy_flags old_ty rewrapped
       let fid' = setVarType fid new_ty
       let uinfo = UInfo{new_id=fid',old_type=old_ty,new_theta=theta',last_ty_var=last_tv'}
-      --outputTcM "Modified id: " fid'
-      --outputTcM "Old type: " oldTy
-      --printBndrTys oldTy
-      outputTcM "New type: " $ varType fid'
-      printBndrTys $ varType fid'
-      outputTcM "New theta: " theta'
-      forM_ theta' $ \case
-        TyConApp _ [TyVarTy var] -> outputTcM "  type var in theta: " $ varUnique var
-        _ -> return ()
       updTcRef updateEnv (\env -> extendDNameEnv env (varName fid') uinfo)
-      printLnTcM "}"
       return b {fun_id=L loc fid', fun_ext=(wrapper', ctick)}
   where
     add_flag :: ForAllTyFlag -> State [ForAllTyFlag] ForAllTyFlag
@@ -205,14 +152,11 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
     copy_flags :: Type -> Type -> TcM Type
     copy_flags src tgt = do
       let old_flags = get_flags src
-      outputTcM "old flags" old_flags
       let new_flags = get_flags tgt
-      outputTcM "new flags" new_flags
       unless (length old_flags == length new_flags) $ failTcM $ text "number of foralls changed, bug"
       let (result, remaining_flags) = everywhereM (mkM set_flag) tgt `runState` reverse old_flags
       unless (null remaining_flags) $ error "impossible"
       let set_flags = get_flags result
-      outputTcM "set flags" set_flags
       unless (old_flags == set_flags) $ failTcM $ text "flag setting failed"
       return result
 rewriteFunBind _ b = return b
@@ -223,7 +167,6 @@ namedBinderVar _ = Nothing
 
 rewriteHsWrapper :: HsWrapper -> TcM (Maybe (HsWrapper, [PredType], TyVar))
 rewriteHsWrapper wrapper = do
-  --printLnTcM "rewriteHsWrapper {"
   newArgsRef <- newTcRef []
   wrapper' <- everywhereM (mkM (rewriteWpLet newArgsRef)) wrapper
   tys <- readTcRef newArgsRef
@@ -231,21 +174,16 @@ rewriteHsWrapper wrapper = do
     [] -> return Nothing
     [[]] -> return Nothing
     [new_ev_vars] -> do
-      printLnTcM "Removing placeholders from wrapper: "
-      printWrapper 1 wrapper
       target_tv <- findLastTyLamOfSet (tyCoVarsOfTypes $ map evVarPred new_ev_vars) wrapper'
       (tv, wrapper'') <- rewriteLastTyLamAfter new_ev_vars target_tv wrapper'
       return $ Just (wrapper'', map evVarPred new_ev_vars, tv) 
     _ -> failTcM $ text "encountered multiple zonked WpLet, this should not happen"
-  --printLnTcM "}"
   return res
 
 rewriteWpLet :: TcRef [[EvVar]] -> HsWrapper -> TcM HsWrapper
 rewriteWpLet newArgsRef (WpLet ev_binds) = do
-  --printLnTcM "rewriteWpLet {"
   (ev_vars, ev_binds') <- rewriteTcEvBinds ev_binds
   updTcRef newArgsRef (ev_vars :)
-  --printLnTcM "}"
   return $ WpLet ev_binds'
 rewriteWpLet _ w = return w
 

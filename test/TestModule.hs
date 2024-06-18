@@ -10,11 +10,11 @@
 {-# LANGUAGE RankNTypes #-}
 {-# OPTIONS_GHC -dcore-lint #-}
 module TestModule 
---  (testExposed, testExposedCall, testAll)
+  (testExposedSimple, testExposedCall1, testExposedCall2, testAll)
 where
 
 import Data.Proxy
-import TotalClassPlugin
+import TotalClassPlugin ()
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 testBaseline :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
@@ -25,16 +25,16 @@ testSimple :: forall (s :: Symbol). Proxy s -> String
 testSimple x = symbolVal x
 
 -- Function requiring rewrite
-testExposed :: forall (s :: Symbol). Proxy s -> String
-testExposed x = symbolVal x
+testExposedSimple :: forall (s :: Symbol). Proxy s -> String
+testExposedSimple x = symbolVal x
 
 -- Call to rewritten function, caller already has constraint
-testExposedCall :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
-testExposedCall x = testSimple x
+testExposedCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
+testExposedCall1 x = testSimple x
 --
----- Call to rewritten function, caller will also need rewrite
---testTransExposedCall :: forall (s :: Symbol). Proxy s -> String 
---testTransExposedCall x = testSimple x
+-- Call to rewritten function, caller will also need rewrite
+testExposedCall2 :: forall (s :: Symbol). Proxy s -> String 
+testExposedCall2 x = testSimple x
 --
 -- Call to rewritten function, caller already has constraint
 testCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 

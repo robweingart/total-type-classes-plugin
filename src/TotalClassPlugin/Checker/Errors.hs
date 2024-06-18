@@ -52,7 +52,6 @@ checkQuasiError thing_inside = do
   case result of
     Just x -> return $ Right x
     Nothing -> do
-      outputTcM "TH errors:" msgs
       let (fatal, check_failure) = partitionBagWith get_th_msg $ mapMaybeBag get_th_error $ getMessages msgs
       case (headMaybe fatal, headMaybe check_failure) of
         (Nothing, Nothing) -> failWithTotal TotalError

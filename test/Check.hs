@@ -89,8 +89,17 @@ class TestCtxtBad (a :: Type) (n :: MyNat) where
 instance TestCtxtBad a Z
 instance (TestCtxtBad a n, Monoid a) => TestCtxtBad a (S n)
 
-instance TotalClass TestCtxtBad where
-  totalityEvidence = checkTotality
+--instance TotalClass TestNonEx where
+--  totalityEvidence = checkTotality
+--
+--instance TotalClass TestNonADTBad where
+--  totalityEvidence = checkTotality
+--
+--instance TotalClass TestNonTerm where
+--  totalityEvidence = checkTotality
+--
+--instance TotalClass TestCtxtBad where
+--  totalityEvidence = checkTotality
 
 testAll :: IO ()
 testAll = do

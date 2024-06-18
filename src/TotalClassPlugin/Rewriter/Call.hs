@@ -28,6 +28,7 @@ import GHC.Tc.Solver (captureTopConstraints, simplifyTop)
 import GHC.Stack (emptyCallStack)
 import Data.Maybe (isJust)
 import TotalClassPlugin.Rewriter.Placeholder (isPlaceholder)
+import TotalClassPlugin.GHCUtils (hsWrapperTypeSubst, piResultTysSubst)
 
 rewriteCalls :: UpdateEnv -> LHsBinds GhcTc -> (LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteCalls ids binds cont

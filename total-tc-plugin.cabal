@@ -73,7 +73,8 @@ library
         TotalClassPlugin.Rewriter.Env,
         TotalClassPlugin.Checker.Solve,
         TotalClassPlugin.Checker.TH,
-        TotalClassPlugin.Checker.Errors
+        TotalClassPlugin.Checker.Errors,
+        TotalClassPlugin.GHCUtils
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module TotalClassPlugin.Rewriter.Utils (withTcRef, printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, piResultTysSubst, hsWrapperTypeSubst, orElseM, mkMMaybe, orReturn) where
+module TotalClassPlugin.Rewriter.Utils (withTcRef, printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, orElseM, mkMMaybe, orReturn) where
 
 import Data.Foldable (forM_)
 
@@ -8,7 +8,6 @@ import GHC.Plugins
 import GHC.Tc.Types (TcM, TcRef)
 import GHC.Tc.Types.Evidence (HsWrapper (..), EvBind(EvBind), TcEvBinds (TcEvBinds, EvBinds), EvTerm (EvExpr), EvBindsVar (ebv_tcvs, ebv_binds, CoEvBindsVar, EvBindsVar), evBindMapBinds)
 import GHC.Core.TyCo.Rep (Type(..), Scaled (Scaled))
-import GHC.Core.TyCo.Subst (substTy)
 import GHC.Hs.Dump (showAstData, BlankSrcSpan (BlankSrcSpan), BlankEpAnnotations (BlankEpAnnotations))
 import GHC.Tc.Utils.Monad (failWith, newTcRef, readTcRef)
 import GHC.Tc.Errors.Types (TcRnMessage(TcRnUnknownMessage))
@@ -121,84 +120,6 @@ printEvBinds n binds = do
       _ -> return ()
     output' (n+3) "RHS: " rhs
 
-piResultTysSubst :: HasDebugCallStack => Type -> [Type] -> (Type, Subst)
-piResultTysSubst ty [] = (ty, mkEmptySubst $ mkInScopeSet emptyVarSet)
-piResultTysSubst ty orig_args@(arg:args)
-  | FunTy { ft_res = res } <- ty
-  = piResultTysSubst res args
-
-  | ForAllTy (Bndr tv _) res <- ty
-  = go (extendTCvSubst init_subst tv arg) res args
-
-  | Just ty' <- coreView ty
-  = piResultTysSubst ty' orig_args
-
-  | otherwise
-  = pprPanic "piResultTysSubst1" (ppr ty $$ ppr orig_args)
-  where
-    init_subst = mkEmptySubst $ mkInScopeSet (tyCoVarsOfTypes (ty:orig_args))
-
-    go :: Subst -> Type -> [Type] -> (Type, Subst)
-    go subst ty' [] = (substTyUnchecked subst ty', subst)
-
-    go subst ty' all_args@(arg':args')
-      | FunTy { ft_res = res } <- ty'
-      = go subst res args'
-
-      | ForAllTy (Bndr tv _) res <- ty'
-      = go (extendTCvSubst subst tv arg') res args'
-
-      | Just ty'' <- coreView ty'
-      = go subst ty'' all_args
-
-      | not (isEmptyTCvSubst subst)  -- See Note [Care with kind instantiation]
-      = go init_subst
-          (substTy subst ty')
-          all_args
-
-      | otherwise
-      = -- We have not run out of arguments, but the function doesn't
-        -- have the right kind to apply to them; so panic.
-        -- Without the explicit isEmptyVarEnv test, an ill-kinded type
-        -- would give an infinite loop, which is very unhelpful
-        -- c.f. #15473
-        pprPanic "piResultTysSubst2" (ppr ty' $$ ppr orig_args $$ ppr all_args)
-
--- | The PRType (ty, tas) is short for (piResultTys ty (reverse tas))
-type PRType = (Type, [Type], Subst)
-
-prTypeType :: PRType -> (Type, Subst)
-prTypeType (ty, tys, subst)
-  | null tys  = (ty, subst)
-  | otherwise = let (ty', subst') = piResultTysSubst ty (reverse tys) in (ty', unionSubst subst subst')
-
-liftPRType :: (Type -> Type) -> PRType -> PRType
-liftPRType f pty = (f ty, [], subst) where (ty, subst) = prTypeType pty
- 
-liftPRType' :: (Type -> (Type, Subst)) -> PRType -> PRType
-liftPRType' f pty = (ty', [], unionSubst s1 s2)
-  where
-    (ty, s1) = prTypeType pty
-    (ty', s2) = f ty
-
-hsWrapperTypeSubst :: HsWrapper -> Type -> (Type, Subst)
-hsWrapperTypeSubst wrap ty = prTypeType $ go wrap (ty, [], empty_subst)
-  where
-    empty_subst = mkEmptySubst $ mkInScopeSet emptyVarSet
-    go :: HsWrapper -> PRType -> PRType
-    go WpHole            = id
-    go (w1 `WpCompose` w2) = go w1 . go w2
-    go (WpFun _ w2 (Scaled m exp_arg))  = liftPRType' $ \t ->
-      let act_res = funResultTy t
-          (exp_res, subst) = hsWrapperTypeSubst w2 act_res
-      in (mkFunctionType m exp_arg exp_res, subst)
-    go (WpCast co)     = liftPRType $ \_ -> coercionRKind co
-    go (WpEvLam v)     = liftPRType $ mkInvisFunTy (idType v)
-    go (WpEvApp _)    = liftPRType $ funResultTy
-    go (WpTyLam tv)    = liftPRType $ mkForAllTy (Bndr tv Inferred)
-    go (WpTyApp ta)    = \(ty',tas, subst) -> (ty', ta:tas, subst)
-    go (WpLet _)       = id
-    go (WpMultCoercion _)  = id
 
 newtype M' m x = M' { unM' :: x -> m x }
 

@@ -3,11 +3,6 @@
 module TotalClassPlugin.Checker.TH ( mkEvidenceFun ) where
 
 import Language.Haskell.TH
-import GHC.Tc.Utils.Monad (TcM)
-import GHC.Plugins (CoreExpr)
-import GHC.Tc.Gen.Splice (runQuasi)
-import GHC.HsToCore.Expr (dsExpr)
-import GHC.ThToHs (convertToHsExpr)
 
 mkEvidenceFun :: Name -> Int -> Q [Dec]
 mkEvidenceFun name arity = do

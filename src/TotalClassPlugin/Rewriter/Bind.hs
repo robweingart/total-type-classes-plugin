@@ -73,7 +73,7 @@ rewriteXHsBindsLR updateEnv (XHsBindsLR (AbsBinds { abs_tvs=tvs
   inner_binds' <- mapM (wrapLocMA (rewriteFunBind newUpdateEnv)) inner_binds
   (added_ev_vars, ev_binds') <- mapAccumM rewrite_ev_binds [] ev_binds
   exports' <- mapM (rewriteABExport newUpdateEnv tvs ev_vars added_ev_vars) exports
-  let ev_vars' = ev_vars ++ added_ev_vars
+  let ev_vars' = added_ev_vars ++ ev_vars
   newUpdates <- readTcRef newUpdateEnv
   updTcRef updateEnv (plusUDFM newUpdates)
   --printLnTcM "}"
@@ -111,7 +111,7 @@ rewriteABExport updateEnv tvs old_ev_vars added_ev_vars e@ABE{abe_mono=mono, abe
   let binders = mkTyVarBinders InferredSpec tvs
   outputTcM "ABExport: " e
   outputTcM "Adding foralls:" binders
-  let theta = map evVarPred (old_ev_vars ++ added_ev_vars)
+  let theta = map evVarPred (added_ev_vars ++ old_ev_vars)
   outputTcM "Adding theta:" theta
   let new_poly = setVarType poly $
                  mkInvisForAllTys binders $
@@ -260,7 +260,6 @@ isNotPlaceholder (EvBind {eb_lhs=evVar, eb_rhs=evTerm})
     return False
   | otherwise = return True
 
-data RewriteState = NotFound | FoundVar TyVar | RewriteDone TyVar
 
 findLastTyLamOfSet :: TyCoVarSet -> HsWrapper -> TcM TyVar
 findLastTyLamOfSet vars w = case go w of
@@ -279,27 +278,25 @@ findLastTyLamOfSet vars w = case go w of
     go _ = Nothing
 
 rewriteLastTyLamAfter :: [EvVar] -> TyVar -> HsWrapper -> TcM (TyVar, HsWrapper)
-rewriteLastTyLamAfter ev_vars target_tv w = case go w NotFound of
-  Left NotFound -> failTcM (text "Couldn't find the target type var" <+> ppr w)
-  Left (FoundVar tv) -> return (tv, w <.> rewrite WpHole)
-  Left (RewriteDone _) -> failTcM (text "Impossible")
+rewriteLastTyLamAfter ev_vars target_tv w = case go w Nothing of
+  Left Nothing -> failTcM (text "Couldn't find the target type var" <+> ppr w)
+  Left (Just tv) -> return (tv, w <.> rewrite WpHole)
   Right (tv, w') -> return (tv, w')
   where
-    go :: HsWrapper -> RewriteState -> Either RewriteState (TyVar, HsWrapper)
-    go _ (RewriteDone tv) = Left (RewriteDone tv)
+    go :: HsWrapper -> Maybe TyVar -> Either (Maybe TyVar) (TyVar, HsWrapper)
     go (WpCompose w1 w2) s = case go w1 s of
       Left s' -> case go w2 s' of
         Left s'' -> Left s''
         Right (tv, w2') -> Right (tv, w1 <.> w2')
       Right (tv, w1') -> Right (tv, w1' <.> w2)
-    go (WpTyLam tv) NotFound = if tv == target_tv then Left (FoundVar tv) else Left NotFound
-    go (WpTyLam tv) (FoundVar _) = Left (FoundVar tv)
+    go (WpTyLam tv) Nothing = if tv == target_tv then Left (Just tv) else Left Nothing
+    go (WpTyLam tv) (Just _) = Left (Just tv)
     go (WpFun w1 w2 args) s = case go w2 s of
-      Left (FoundVar tv) -> Right (tv, WpFun w1 (w2 <.> rewrite WpHole) args)
+      Left (Just tv) -> Right (tv, WpFun w1 (w2 <.> rewrite WpHole) args)
       Left s' -> Left s'
       Right (tv, w2') -> Right (tv, WpFun w1 w2' args)
-    go _ NotFound = Left NotFound
-    go w' (FoundVar tv) = Right (tv, rewrite w')
+    go _ Nothing = Left Nothing
+    go w' (Just tv) = Right (tv, rewrite w')
 
     rewrite w' = foldr ((<.>) . WpEvLam) w' ev_vars
 

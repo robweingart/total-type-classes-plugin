@@ -18,6 +18,7 @@ module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResu
 
 import Data.Kind (Constraint)
 import qualified Data.Kind
+import GHC.TypeLits (KnownNat, KnownChar, KnownSymbol)
 
 class IsClassKind c where
 
@@ -30,29 +31,24 @@ data TotalityEvidence c where UnsafeTotalityEvidence :: TotalityEvidence c deriv
 assertTotality :: IsClassKind ck => TotalityEvidence (c :: ck)
 assertTotality = UnsafeTotalityEvidence
 
---data CheckExhaustiveness = ViaPmc | AssertExhaustiveness
---
---data CheckTermination = ViaPaterson | AssertTermination
---
---data CheckerOptions = COpt CheckExhaustiveness CheckTermination
-
---type family ResultEvidence c (r :: CheckerResult) :: Type where
---  ResultEvidence c CheckerSuccess = TotalityEvidence c
---  ResultEvidence _ _ = ()
-
 type CheckTotalityResult :: forall {ck :: Data.Kind.Type}. ck -> Constraint
 class CheckTotalityResult (c :: ck) where
   isExhaustive :: Bool
   isTerminating :: Bool
   isContextOk :: Bool
 
---class IsClassKind ck => CheckTotality (c :: ck) where
 type CheckTotality :: forall {ck :: Data.Kind.Type}. ck -> Constraint
 class CheckTotality (c :: ck) where
   checkTotality :: TotalityEvidence c
 
---instance (CheckTotalityResult c opt CheckerSuccess) => CheckTotality c opt where
---  checkTotality = resultEvidence @c @opt
-
 class IsClassKind ck => TotalClass (c :: ck) where
   totalityEvidence :: TotalityEvidence c
+
+instance TotalClass KnownNat where
+  totalityEvidence = assertTotality
+
+instance TotalClass KnownChar where
+  totalityEvidence = assertTotality
+
+instance TotalClass KnownSymbol where
+  totalityEvidence = assertTotality

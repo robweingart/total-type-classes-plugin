@@ -90,7 +90,7 @@ check cls fail_on_err = do
 
     check_pred_type tau pred_ty = case classifyPredType pred_ty of
       ClassPred cls' _ | cls == cls' -> Nothing
-      _ -> Just (TotalCheckerInvalidContext pred_ty tau)
+      _ -> Just (TotalCheckerInvalidContext tau pred_ty)
 
     check_context theta tau = mapMaybe (check_pred_type tau) theta
 

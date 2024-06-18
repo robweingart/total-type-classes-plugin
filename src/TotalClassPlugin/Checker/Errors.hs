@@ -36,7 +36,7 @@ instance Diagnostic TotalClassCheckerMessage where
     TotalCheckerTHFailure str ->
       mkSimpleDecorated (text "Exhaustiveness check failed:" $$ text str)
     TotalCheckerTHFatal err -> mkSimpleDecorated (text "Unexpected fatal error during exhaustiveness check code gen:") `unionDecoratedSDoc` diagnosticMessage defaultOpts (TcRnTHError err)
-    TotalCheckerInvalidContext tau pred_ty -> mkSimpleDecorated (text "Invalid constraint " <+> ppr pred_ty <+> text " in instance with head " <+> ppr tau)
+    TotalCheckerInvalidContext tau pred_ty -> mkSimpleDecorated (text "Invalid constraint" <+> ppr pred_ty <+> text "in instance with head" <+> ppr tau)
     TotalError -> mkSimpleDecorated $ text "Unexpected error"
 
   diagnosticReason _ = ErrorWithoutFlag

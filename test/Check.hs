@@ -89,6 +89,9 @@ class TestCtxtBad (a :: Type) (n :: MyNat) where
 instance TestCtxtBad a Z
 instance (TestCtxtBad a n, Monoid a) => TestCtxtBad a (S n)
 
+instance TotalClass TestCtxtBad where
+  totalityEvidence = checkTotality
+
 testAll :: IO ()
 testAll = do
   assertCheckResult @TestGood       "TestGood"       True  True  True

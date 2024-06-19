@@ -140,7 +140,7 @@ splitInstTyForValidity = split_context [] . drop_foralls
       | isInvisibleFunArg af = split_context (pred':preds) tau
     split_context preds ty = (reverse preds, ty)
 
--- Exactly the same as checkInstTerminatino in GHC.Tc.Validity, which is not exported from that module
+-- Exactly the same as checkInstTermination in GHC.Tc.Validity, which is not exported from that module
 checkInstTermination :: ThetaType -> TcPredType -> TcM ()
 checkInstTermination theta head_pred
   = check_preds emptyVarSet theta

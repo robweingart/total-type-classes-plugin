@@ -14,7 +14,7 @@ module TestModule
 where
 
 import Data.Proxy
-import TotalClassPlugin ()
+import TotalClassPlugin (TotalClass (totalityEvidence), CheckTotality (checkTotality))
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 testBaseline :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
@@ -204,6 +204,12 @@ testNestedInferredCall2 x = goInferredCall2  x
 
 testLambdaSimple :: forall (s :: Symbol). Proxy s -> String
 testLambdaSimple = \x -> symbolVal x
+
+testLambdaCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testLambdaCall1 = \x -> testSimple x
+
+testLambdaCall2 :: forall (s :: Symbol). Proxy s -> String
+testLambdaCall2 = \x -> testSimple x
 --
 testExpAppSimple :: forall (s :: Symbol). Proxy s -> String
 testExpAppSimple x = symbolVal @s x
@@ -252,6 +258,26 @@ testNestedEtaCall2 :: forall (s :: Symbol). Proxy s -> String
 testNestedEtaCall2 x = go x
   where
     go = testSimple
+
+data MyNat = Z | S MyNat
+
+class IsNat (n :: MyNat) where
+  toNat :: MyNat
+
+instance IsNat Z where
+  toNat = Z
+instance IsNat n => IsNat (S n) where
+  toNat = S (toNat @n)
+
+data Vec (n :: MyNat) a where
+  VNil :: Vec Z a
+  (:>) :: a -> Vec n a -> Vec (S n) a
+
+instance TotalClass IsNat where
+  totalityEvidence = checkTotality
+
+vlength :: Vec n a -> MyNat
+vlength (_ :: Vec n a) = toNat @n
 --
 testAll :: IO ()
 testAll = do
@@ -298,6 +324,8 @@ testAll = do
   putStrLn $ testNestedInferredCall1 (Proxy :: Proxy "testNestedInferredCall1")
   putStrLn $ testNestedInferredCall2 (Proxy :: Proxy "testNestedInferredCall2")
   putStrLn $ testLambdaSimple (Proxy :: Proxy "testLambdaSimple")
+  putStrLn $ testLambdaCall1 (Proxy :: Proxy "testLambdaCall1")
+  putStrLn $ testLambdaCall2 (Proxy :: Proxy "testLambdaCall2")
   putStrLn $ testExpAppSimple (Proxy :: Proxy "testExpAppSimple")
   putStrLn $ testExpAppCall1 (Proxy :: Proxy "testExpAppCall1")
   putStrLn $ testExpAppCall2 (Proxy :: Proxy "testExpAppCall2")
@@ -306,6 +334,7 @@ testAll = do
   putStrLn $ testExpAppCalls'3 (Proxy :: Proxy "testExpAppCalls'3 arg 1,") (Proxy :: Proxy "testExpAppCalls'3 arg 2") 
   putStrLn $ testExpAppCalls'4 (Proxy :: Proxy "testExpAppCalls'4 arg 1,") (Proxy :: Proxy "testExpAppCalls'4 arg 2") 
   putStrLn $ testExpAppCalls'5 (Proxy :: Proxy "testExpAppCalls'5 arg 1,") (Proxy :: Proxy "testExpAppCalls'5 arg 2") 
+  putStrLn $ testExpAppCalls'6 (Proxy :: Proxy "testExpAppCalls'6 arg 1,") (Proxy :: Proxy "testExpAppCalls'6 arg 2") 
   putStrLn $ testArgBeforeTy () (Proxy :: Proxy "testArgBeforeTy")
   putStrLn $ testArgBeforeTy' (Proxy :: Proxy "testArgBeforeTy'")
   putStrLn $ testNestedEtaSimple (Proxy :: Proxy "testNestedEtaSimple")

@@ -10,13 +10,13 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Check where
 
 import Data.Kind
 import TotalClassPlugin
-import Control.Exception (evaluate, assert)
 
 assertCheckResult :: forall {ck} (c :: ck). CheckTotalityResult c => String -> Bool -> Bool -> Bool -> IO ()
 assertCheckResult str ex term ctxt = do
@@ -53,13 +53,13 @@ class IsNat (n :: MyNat) where
 instance IsNat Z where
 instance IsNat n => IsNat (S n) where
 
-class TestGood (x :: MyNat) (y :: MyNat) where
+class TestMultiParam (x :: MyNat) (y :: MyNat) where
 
-instance TestGood Z Z where
+instance TestMultiParam Z Z where
 
-instance TestGood Z y => TestGood Z (S y) where
+instance TestMultiParam Z y => TestMultiParam Z (S y) where
 
-instance TestGood x y => TestGood (S x) y
+instance TestMultiParam x y => TestMultiParam (S x) y
 
 class TestNonEx (n :: MyNat) where
 
@@ -74,12 +74,9 @@ class TestNonTerm (n :: MyNat) where
 instance TestNonTerm Z
 instance TestNonTerm (S n) => TestNonTerm (S n)
 
-instance TotalClass IsNat where
-  totalityEvidence = checkTotality 
-
-class TestNonADTGood (a :: Type) (n :: MyNat) where
-instance TestNonADTGood a Z
-instance TestNonADTGood a n => TestNonADTGood a (S n)
+class TestNonADT (a :: Type) (n :: MyNat) where
+instance TestNonADT a Z
+instance TestNonADT a n => TestNonADT a (S n)
 
 class TestNonADTBad (a :: Type) (n :: MyNat) where
 instance TestNonADTBad (Bool -> Int) Z
@@ -91,21 +88,38 @@ instance (TestCtxtBad a n, Monoid a) => TestCtxtBad a (S n)
 
 --instance TotalClass TestNonEx where
 --  totalityEvidence = checkTotality
---
+
 --instance TotalClass TestNonADTBad where
 --  totalityEvidence = checkTotality
---
+
 --instance TotalClass TestNonTerm where
 --  totalityEvidence = checkTotality
---
+
 --instance TotalClass TestCtxtBad where
 --  totalityEvidence = checkTotality
 
+instance TotalClass IsNat where
+  totalityEvidence = checkTotality
+
+instance TotalClass TestMultiParam where
+  totalityEvidence = checkTotality
+
+instance TotalClass TestNonADT where
+  totalityEvidence = checkTotality
+ 
+type Effect = (Type -> Type) -> (Type -> Type)
+
+class Append (xs :: [Effect]) (ys :: [Effect])
+instance Append '[] ys
+instance Append xs ys => Append (x ': xs) ys
+instance TotalClass Append where
+  totalityEvidence = checkTotality
+
 testAll :: IO ()
 testAll = do
-  assertCheckResult @TestGood       "TestGood"       True  True  True
+  assertCheckResult @TestMultiParam "TestMultiParam" True  True  True
   assertCheckResult @TestNonEx      "TestNonEx"      False True  True
   assertCheckResult @TestNonTerm    "TestNonTerm"    True  False True
-  assertCheckResult @TestNonADTGood "TestNonADTGood" True  True  True
+  assertCheckResult @TestNonADT     "TestNonADT"     True  True  True
   assertCheckResult @TestNonADTBad  "TestNonADTBad"  False True  True
   assertCheckResult @TestCtxtBad    "TestCtxtBad"    True  True  False

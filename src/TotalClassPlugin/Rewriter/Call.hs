@@ -63,14 +63,14 @@ rezonkTcEvBinds (EvBinds ebs) = return ebs
 
 reskolemise :: [TyVar] -> [EvVar] -> TcM result -> TcM (TcEvBinds, result)
 reskolemise [] [] thing_inside = do
-    res <- thing_inside
-    return (emptyTcEvBinds, res)
+  res <- thing_inside
+  return (emptyTcEvBinds, res)
 reskolemise tvs given thing_inside = do
-    (new_ev_binds, result) <- 
-      checkConstraints (UnkSkol emptyCallStack) tvs given $
-      tcExtendNameTyVarEnv (mkTyVarNamePairs tvs) $
-      thing_inside
-    return (new_ev_binds, result)
+  (new_ev_binds, result) <- 
+    checkConstraints (UnkSkol emptyCallStack) tvs given $
+    tcExtendNameTyVarEnv (mkTyVarNamePairs tvs) $
+    thing_inside
+  return (new_ev_binds, result)
 
 reskolemiseWrapper :: HsWrapper -> TcM result -> TcM (HsWrapper, result)
 reskolemiseWrapper WpHole thing_inside = do

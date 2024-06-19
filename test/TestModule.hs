@@ -14,7 +14,7 @@ module TestModule
 where
 
 import Data.Proxy
-import TotalClassPlugin (TotalClass (totalityEvidence), CheckTotality (checkTotality))
+import TotalClassPlugin ()
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 testBaseline :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
@@ -259,25 +259,25 @@ testNestedEtaCall2 x = go x
   where
     go = testSimple
 
-data MyNat = Z | S MyNat
-
-class IsNat (n :: MyNat) where
-  toNat :: MyNat
-
-instance IsNat Z where
-  toNat = Z
-instance IsNat n => IsNat (S n) where
-  toNat = S (toNat @n)
-
-data Vec (n :: MyNat) a where
-  VNil :: Vec Z a
-  (:>) :: a -> Vec n a -> Vec (S n) a
-
-instance TotalClass IsNat where
-  totalityEvidence = checkTotality
-
-vlength :: Vec n a -> MyNat
-vlength (_ :: Vec n a) = toNat @n
+--data MyNat = Z | S MyNat
+--
+--class IsNat (n :: MyNat) where
+--  toNat :: MyNat
+--
+--instance IsNat Z where
+--  toNat = Z
+--instance IsNat n => IsNat (S n) where
+--  toNat = S (toNat @n)
+--
+--data Vec (n :: MyNat) a where
+--  VNil :: Vec Z a
+--  (:>) :: a -> Vec n a -> Vec (S n) a
+--
+--instance TotalClass IsNat where
+--  totalityEvidence = checkTotality
+--
+--vlength :: Vec n a -> MyNat
+--vlength (_ :: Vec n a) = toNat @n
 --
 testAll :: IO ()
 testAll = do

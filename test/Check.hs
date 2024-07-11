@@ -65,7 +65,7 @@ class TestNonEx (n :: MyNat) where
 
 instance TestNonEx Z where
 
---instance TestNonEx (S Z) where
+instance TestNonEx (S Z) where
 
 instance TestNonEx n => TestNonEx (S (S n))
 
@@ -113,6 +113,17 @@ class Append (xs :: [Effect]) (ys :: [Effect])
 instance Append '[] ys
 instance Append xs ys => Append (x ': xs) ys
 instance TotalClass Append where
+  totalityEvidence = checkTotality
+
+class TestPair (a :: (MyNat, MyNat)) where
+
+instance TestPair '(Z, Z) where
+
+instance TestPair '(Z, y) => TestPair '(Z, S y) where
+
+instance TestPair '(x, y) => TestPair '(S x, y)
+
+instance TotalClass TestPair where
   totalityEvidence = checkTotality
 
 testAll :: IO ()

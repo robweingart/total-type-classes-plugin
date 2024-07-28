@@ -10,7 +10,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# OPTIONS_GHC -dcore-lint #-}
 module TestModule 
-  (testExposedSimple, testExposedCall1, testExposedCall2, testAll)
+--    (testAll)
+   (testExposedSimple, testExposedCall1, testExposedCall2, testAll)
 where
 
 import Data.Proxy
@@ -340,3 +341,4 @@ testAll = do
   putStrLn $ testNestedEtaSimple (Proxy :: Proxy "testNestedEtaSimple")
   putStrLn $ testNestedEtaCall1 (Proxy :: Proxy "testNestedEtaCall1")
   putStrLn $ testNestedEtaCall2 (Proxy :: Proxy "testNestedEtaCall2")
+  return ()

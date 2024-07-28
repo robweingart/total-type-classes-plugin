@@ -18,16 +18,21 @@ totalClassName = do
 solveWithPlaceholder :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
 solveWithPlaceholder ct
   | Just (targetClass, _) <- getClassPredTys_maybe $ ctPred ct = do
+    tcPluginIO $ putStrLn ("Trying to solve:" ++ showPprUnsafe ct)
     totalClass <- totalClassName >>= tcLookupClass
     if targetClass == totalClass
-    then return Nothing
+    then do
+      tcPluginIO $ putStrLn ("This is TotalClass, skipping:" ++ showPprUnsafe targetClass)
+      return Nothing
     else do
       let targetTyConTy = mkTyConTy $ classTyCon targetClass
       let predType = mkTyConApp (classTyCon totalClass) [typeKind targetTyConTy, targetTyConTy] 
       newCt <- mkNonCanonical <$> newWanted (ctLoc ct) predType
       (wc, _) <- unsafeTcPluginTcM $ runTcS $ solveWanteds (mkSimpleWC [ctEvidence newCt])
       if isSolvedWC wc
-      then return $ Just (mkPlaceholder predType, ct)
+      then do 
+        tcPluginIO $ putStrLn ("Inserting placeholder:" ++ showPprUnsafe predType)
+        return $ Just (mkPlaceholder predType, ct)
       else return Nothing
   | otherwise = return Nothing
 

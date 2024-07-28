@@ -6,6 +6,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
+module Demo where
+
 import TotalClassPlugin (TotalClass (..), checkTotality)
 
 data Nat = Z | S Nat
@@ -28,3 +30,6 @@ instance IsNat n => IsNat (S n) where
 
 instance TotalClass IsNat where
   totalityEvidence = checkTotality
+
+--foo :: a -> String
+--foo x = show x

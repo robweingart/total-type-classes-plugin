@@ -7,7 +7,7 @@ import GHC.Tc.Plugin
 import GHC.Tc.Types.Evidence (EvTerm (EvExpr))
 import GHC.Tc.Types.Constraint (Ct, ctPred, ctLoc)
 import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds))
-import GHC (Class)
+import GHC (Class, GhcPs, LHsDecl)
 import Data.Maybe (mapMaybe, maybeToList)
 import GHC.Core.Class (Class(classTyCon, className))
 import GHC.ThToHs (convertToHsDecls)
@@ -23,11 +23,13 @@ import GHC.Tc.Errors.Types (TcRnMessage (TcRnTHError), THError (THSpliceFailed),
 import TotalClassPlugin.Checker.TH (mkEvidenceFun)
 import Language.Haskell.TH (mkName)
 import GHC.Core.Predicate (Pred(..), classifyPredType)
-import GHC.Core.InstEnv (classInstances, ClsInst (is_dfun))
+import GHC.Core.InstEnv (classInstances, ClsInst (is_dfun, is_dfun_name), InstEnvs (ie_global, ie_local), memberInstEnv)
 import GHC.Tc.Utils.Env (tcGetInstEnvs)
 import TotalClassPlugin.Checker.Errors (checkDsResult, TotalClassCheckerMessage (TotalCheckerInvalidContext), checkTcRnResult, failWithTotal, checkPaterson, checkQuasiError)
 import GHC.Data.Maybe (listToMaybe)
 import TotalClassPlugin.GHCUtils (checkInstTermination, splitInstTyForValidity)
+import Data.Data (Data)
+import GHC.Hs.Dump (showAstData, BlankSrcSpan (..), BlankEpAnnotations (..), showAstDataFull)
 
 getCheckClass :: TcPluginM Class
 getCheckClass = do
@@ -48,24 +50,47 @@ getTotalityEvidenceType = do
   tcLookupTyCon name
 
 solveCheck :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
-solveCheck ct = case classifyPredType (ctPred ct) of
+solveCheck ct = do
+  tcPluginIO $ putStrLn ("solveCheck " ++ showPprUnsafe ct)
+  solveCheck' ct
+
+solveCheck' :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
+solveCheck' ct = case classifyPredType (ctPred ct) of
   ClassPred targetClass tys -> do
+    tcPluginIO $ putStrLn ("target class is " ++ showPprUnsafe targetClass ++ " applied to " ++ showPprUnsafe tys)
     checkClass <- getCheckClass
     checkResultClass <- getCheckResultClass
     let maybe_get_result = if | targetClass == checkClass -> Just False
                               | targetClass == checkResultClass -> Just True
                               | otherwise -> Nothing
     case maybe_get_result of
-      Nothing -> return Nothing
+      Nothing -> do 
+        tcPluginIO $ putStrLn "not CheckTotality(Result)"
+        return Nothing
       Just get_result -> case tys of
         [ck, c] | ClassPred cls [] <- classifyPredType c  -> do
+            tcPluginIO $ putStrLn ("starting check: " ++ showPprUnsafe cls)
             res <- unsafeTcPluginTcM (setCtLocM (ctLoc ct) $ check cls (not get_result))
             ev_term <- if get_result
               then mk_check_result_inst ck cls res
               else mk_check_inst ck cls
             return $ Just (ev_term, ct)
-        _ -> fail "wrong class app type"
-  _ -> return Nothing
+        [ck, c] -> do
+          envs <- getInstEnvs
+          --tcPluginIO $ putStrLn ("global: " ++ showPprUnsafe (ie_global envs) ++ "local: " ++ showPprUnsafe (ie_local envs))
+          case classifyPredType c of
+            ClassPred cls _ -> do 
+              tcPluginIO $ putStrLn ("wrong app type: " ++ showSDocUnsafe (showAstDataFull c))
+              --let insts = classInstances envs cls
+              --tcPluginIO $ putStrLn $ showPprUnsafe insts
+              --tcPluginIO $ putStrLn $ showPprUnsafe $ map is_dfun_name insts
+              --tcPluginIO $ putStrLn $ showPprUnsafe $ filter (not . memberInstEnv (ie_local envs)) insts
+            _ -> return ()
+          return Nothing
+        _ -> return Nothing
+  _ -> do
+    tcPluginIO $ putStrLn "not a class predicate"
+    return Nothing
 
 check :: Class -> Bool -> TcM (Bool, Bool, Bool)
 check cls fail_on_err = do
@@ -107,15 +132,27 @@ check_exhaustiveness cls = do
         ev_fun_binds <- case convertToHsDecls (Generated DoPmc) noSrcSpan ev_fun_dec of
           Left err -> failWithTc $ TcRnTHError (THSpliceFailed (RunSpliceFailure err))
           Right ev_fun_binds -> return ev_fun_binds
+        --outputFullTcM "ev_fun_binds: " ev_fun_binds
         (group, Nothing) <- findSplice ev_fun_binds
+        --outputFullTcM "parsed group: " group
         (gbl_rn, rn_group) <- updGblEnv (\env -> env{tcg_binds=emptyBag}) $ rnTopSrcDecls group
+        --outputFullTcM "renamed group: " rn_group
         ((gbl_tc, _), _) <- captureTopConstraints $ setGblEnv gbl_rn $ tcTopSrcDecls rn_group
         (_, _, binds, _, _, _) <- setGblEnv gbl_tc $ zonkTopDecls emptyBag (tcg_binds gbl_tc) [] [] [] 
         return binds
       checkDsResult cls $ updTopFlags (flip wopt_set Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds
+  where
+    outputFullTcM :: Data a => String -> a -> TcM ()
+    outputFullTcM str x = do
+      dFlags <- getDynFlags
+      liftIO $ putStrLn $ str ++ showSDoc dFlags (showAstData BlankSrcSpan BlankEpAnnotations x)
   --where
   --  match_on_bndr (Bndr _ (NamedTCB _)) = Nothing
   --  match_on_bndr (Bndr var AnonTCB) = Just $ isAlgType (tyVarKind var)
+--
+--mk_ps_ev_fun :: Class -> TcM (LHsDecl GhcPs)
+--mk_ps_ev_fun cls = do
+--  return 
 
 
 mk_check_inst :: Type -> Class -> TcPluginM EvTerm

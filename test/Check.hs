@@ -11,6 +11,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Check where
@@ -65,7 +66,7 @@ class TestNonEx (n :: MyNat) where
 
 instance TestNonEx Z where
 
-instance TestNonEx (S Z) where
+--instance TestNonEx (S Z) where
 
 instance TestNonEx n => TestNonEx (S (S n))
 
@@ -126,6 +127,22 @@ instance TestPair '(x, y) => TestPair '(S x, y)
 instance TotalClass TestPair where
   totalityEvidence = checkTotality
 
+--
+--class TestPartial (a :: Type) (n :: MyNat)
+--instance TestPartial Bool Z
+--instance TestPartial Bool n => TestPartial Bool (S n)
+--instance TotalClass (TestPartial Bool) where
+--  totalityEvidence = checkTotality
+
+class TestRepeatBad (x :: MyNat) (y :: MyNat)
+instance TestRepeatBad x x
+
+type SingI :: forall {k}. k -> Constraint
+class SingI a where
+
+instance TotalClass (SingI :: MyNat -> Constraint) where
+  totalityEvidence = checkTotality
+
 testAll :: IO ()
 testAll = do
   assertCheckResult @TestMultiParam "TestMultiParam" True  True  True
@@ -134,3 +151,4 @@ testAll = do
   assertCheckResult @TestNonADT     "TestNonADT"     True  True  True
   assertCheckResult @TestNonADTBad  "TestNonADTBad"  False True  True
   assertCheckResult @TestCtxtBad    "TestCtxtBad"    True  True  False
+  --assertCheckResult @TestRepeatBad  "TestRepeatBad"    False True  True

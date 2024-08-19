@@ -14,11 +14,12 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResult(..), assertTotality, TotalClass(..) ) where
+module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResult(..), assertTotality, TotalClass(..), TotalConstraint(..), mkSecretThing) where
 
 import Data.Kind (Constraint)
 import qualified Data.Kind
 import GHC.TypeLits (KnownNat, KnownChar, KnownSymbol)
+import Language.Haskell.TH.Syntax
 
 class IsClassKind c where
 
@@ -52,3 +53,19 @@ instance TotalClass KnownChar where
 
 instance TotalClass KnownSymbol where
   totalityEvidence = assertTotality
+
+type TotalConstraint :: Constraint -> Constraint
+
+class TotalConstraint c where
+  _totalConstraintEvidence :: TotalityEvidence c
+
+instance TotalConstraint (KnownNat n) where
+  _totalConstraintEvidence = assertTotality
+
+secretInternal :: String
+secretInternal = "secret"
+
+mkSecretThing :: Q [Dec]
+mkSecretThing = [d| 
+  secret :: String
+  secret = secretInternal |]

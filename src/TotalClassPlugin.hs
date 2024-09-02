@@ -14,7 +14,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResult(..), assertTotality, TotalClass(..), TotalConstraint(..), mkSecretThing) where
+module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResult(..), assertTotality, TotalClass(..), TotalConstraint(..), mkSecretThing, mkTotalConstraint, warnInfo) where
 
 import Data.Kind (Constraint)
 import qualified Data.Kind
@@ -69,3 +69,23 @@ mkSecretThing :: Q [Dec]
 mkSecretThing = [d| 
   secret :: String
   secret = secretInternal |]
+
+mkTotalConstraint :: Q Type -> Q [Dec]
+mkTotalConstraint qty = do
+  ty <- qty
+  let (tvs, theta, constraint) = case ty of
+       ForallT bndrs cxt inner -> (bndrs, cxt, inner)
+       inner -> ([], [], inner)
+  reportWarning ("pred: " ++ show constraint)
+  headTy <- [t| TotalConstraint $(return constraint) |]
+  insts <- case constraint of
+    AppT (ConT cls_name) arg -> reifyInstances cls_name [arg]
+    _ -> return []
+  reportWarning ("instances: " ++ show insts)
+  return [InstanceD Nothing theta headTy []]
+
+warnInfo :: Name -> Q [Dec]
+warnInfo name = do
+  info <- reify name
+  reportWarning ("info: " ++ show info)
+  return []

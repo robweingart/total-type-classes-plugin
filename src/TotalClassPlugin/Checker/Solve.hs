@@ -1,4 +1,5 @@
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE LambdaCase #-}
 
 module TotalClassPlugin.Checker.Solve ( solveCheck ) where
 
@@ -6,30 +7,39 @@ import GHC.Plugins
 import GHC.Tc.Plugin
 import GHC.Tc.Types.Evidence (EvTerm (EvExpr))
 import GHC.Tc.Types.Constraint (Ct, ctPred, ctLoc)
-import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds))
+import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds), modifyLclCtxt, TcTyThing (ATcId), IdBindingInfo (NotLetBound), TcLclEnv)
 import GHC (Class, GhcPs, LHsDecl)
 import Data.Maybe (mapMaybe, maybeToList)
 import GHC.Core.Class (Class(classTyCon, className))
-import GHC.ThToHs (convertToHsDecls)
+import GHC.ThToHs (convertToHsDecls, convertToHsType, thRdrNameGuesses)
 import GHC.Rename.Module (findSplice)
 import GHC.Tc.Module (rnTopSrcDecls, tcTopSrcDecls)
 import GHC.Tc.Solver (captureTopConstraints)
-import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, failWithTc, setCtLocM, tryTc, mapAndUnzipM)
+import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, failWithTc, setCtLocM, tryTc, mapAndUnzipM, newSysName, updLclEnv)
 import GHC.HsToCore.Monad (initDsTc)
 import GHC.HsToCore.Binds (dsTopLHsBinds)
 import GHC.Tc.Zonk.Type (zonkTopDecls)
 import GHC.Data.Bag (emptyBag)
 import GHC.Tc.Errors.Types (TcRnMessage (TcRnTHError), THError (THSpliceFailed), SpliceFailReason (..))
 import TotalClassPlugin.Checker.TH (mkEvidenceFun)
-import Language.Haskell.TH (mkName)
+import qualified Language.Haskell.TH as TH
+import Language.Haskell.TH (mkName, reifyType)
 import GHC.Core.Predicate (Pred(..), classifyPredType)
-import GHC.Core.InstEnv (classInstances, ClsInst (is_dfun, is_dfun_name), InstEnvs (ie_global, ie_local), memberInstEnv)
-import GHC.Tc.Utils.Env (tcGetInstEnvs)
+import GHC.Core.InstEnv (classInstances, ClsInst (is_dfun, is_dfun_name, is_tys), InstEnvs (ie_global, ie_local), memberInstEnv, lookupInstEnv, getPotentialUnifiers, instanceBindFun)
+import GHC.Tc.Utils.Env (tcGetInstEnvs, tcExtendLocalTypeEnv, tcExtendIdEnv)
 import TotalClassPlugin.Checker.Errors (checkDsResult, TotalClassCheckerMessage (TotalCheckerInvalidContext), checkTcRnResult, failWithTotal, checkPaterson, checkQuasiError)
 import GHC.Data.Maybe (listToMaybe)
 import TotalClassPlugin.GHCUtils (checkInstTermination, splitInstTyForValidity)
 import Data.Data (Data)
 import GHC.Hs.Dump (showAstData, BlankSrcSpan (..), BlankEpAnnotations (..), showAstDataFull)
+import TotalClassPlugin.Rewriter.Utils (outputTcM, outputFullTcM, failTcM, printLnTcM)
+import GHC.Tc.Utils.TcType (isOverlappableTyVar, tyCoVarsOfTypesList, TcTyVarDetails (..), eqType)
+import GHC.Core.TyCo.Rep (Type(..))
+import Control.Monad (forM_)
+import GHC.Core.TyCo.Subst (substTyCoVars)
+import GHC.Tc.Utils.Instantiate (tcInstSkolTyVars)
+import GHC.Tc.Types.Origin (unkSkol)
+import GHC.Core.Unify (tcUnifyTysFG, UnifyResultM (..))
 
 getCheckClass :: TcPluginM Class
 getCheckClass = do
@@ -51,13 +61,13 @@ getTotalityEvidenceType = do
 
 solveCheck :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
 solveCheck ct = do
-  tcPluginIO $ putStrLn ("solveCheck " ++ showPprUnsafe ct)
+  --tcPluginIO $ putStrLn ("solveCheck " ++ showPprUnsafe ct)
   solveCheck' ct
 
 solveCheck' :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
 solveCheck' ct = case classifyPredType (ctPred ct) of
   ClassPred targetClass tys -> do
-    tcPluginIO $ putStrLn ("target class is " ++ showPprUnsafe targetClass ++ " applied to " ++ showPprUnsafe tys)
+    --tcPluginIO $ putStrLn ("target class is " ++ showPprUnsafe targetClass ++ " applied to " ++ showPprUnsafe tys)
     checkClass <- getCheckClass
     checkResultClass <- getCheckResultClass
     let maybe_get_result = if | targetClass == checkClass -> Just False
@@ -65,32 +75,105 @@ solveCheck' ct = case classifyPredType (ctPred ct) of
                               | otherwise -> Nothing
     case maybe_get_result of
       Nothing -> do 
-        tcPluginIO $ putStrLn "not CheckTotality(Result)"
+        --tcPluginIO $ putStrLn "not CheckTotality(Result)"
         return Nothing
       Just get_result -> case tys of
-        [ck, c] | ClassPred cls [] <- classifyPredType c  -> do
-            tcPluginIO $ putStrLn ("starting check: " ++ showPprUnsafe cls)
-            res <- unsafeTcPluginTcM (setCtLocM (ctLoc ct) $ check cls (not get_result))
-            ev_term <- if get_result
-              then mk_check_result_inst ck cls res
-              else mk_check_inst ck cls
-            return $ Just (ev_term, ct)
-        [ck, c] -> do
-          envs <- getInstEnvs
-          --tcPluginIO $ putStrLn ("global: " ++ showPprUnsafe (ie_global envs) ++ "local: " ++ showPprUnsafe (ie_local envs))
-          case classifyPredType c of
-            ClassPred cls _ -> do 
-              tcPluginIO $ putStrLn ("wrong app type: " ++ showSDocUnsafe (showAstDataFull c))
-              --let insts = classInstances envs cls
-              --tcPluginIO $ putStrLn $ showPprUnsafe insts
-              --tcPluginIO $ putStrLn $ showPprUnsafe $ map is_dfun_name insts
-              --tcPluginIO $ putStrLn $ showPprUnsafe $ filter (not . memberInstEnv (ie_local envs)) insts
-            _ -> return ()
-          return Nothing
+        [ck, c] | ClassPred cls args <- classifyPredType c -> do
+          let do_check = case args of { [] -> check cls (not get_result); _ -> checkConstraint cls args (not get_result) }
+          --tcPluginIO $ putStrLn ("starting check: " ++ showPprUnsafe cls)
+          res <- unsafeTcPluginTcM (setCtLocM (ctLoc ct) do_check)
+          ev_term <- if get_result
+            then mk_check_result_inst ck cls res
+            else mk_check_inst ck cls
+          return $ Just (ev_term, ct)
+        --[ck, c] -> do
+        --  envs <- getInstEnvs
+        --  --tcPluginIO $ putStrLn ("global: " ++ showPprUnsafe (ie_global envs) ++ "local: " ++ showPprUnsafe (ie_local envs))
+        --  case classifyPredType c of
+        --    ClassPred cls _ -> do 
+        --      tcPluginIO $ putStrLn ("wrong app type: " ++ showSDocUnsafe (showAstDataFull c))
+        --      --let insts = classInstances envs cls
+        --      --tcPluginIO $ putStrLn $ showPprUnsafe insts
+        --      --tcPluginIO $ putStrLn $ showPprUnsafe $ map is_dfun_name insts
+        --      --tcPluginIO $ putStrLn $ showPprUnsafe $ filter (not . memberInstEnv (ie_local envs)) insts
+        --    _ -> return ()
+        --  return Nothing
         _ -> return Nothing
   _ -> do
     tcPluginIO $ putStrLn "not a class predicate"
     return Nothing
+
+checkConstraint :: Class -> [Type] -> Bool -> TcM (Bool, Bool, Bool)
+checkConstraint cls args fail_on_err = do
+  outputTcM "Class: " cls
+  outputFullTcM "args: " args
+  --forM_ args $ \case
+  --  TyVarTy v -> do
+  --    outputTcM "overlappable? " $ isOverlappableTyVar v
+  --    outputTcM "details: " $ tcTyVarDetails v
+  --  _ -> return ()
+  inst_envs <- tcGetInstEnvs
+  --outputTcM "Insts: " $ classInstances inst_envs cls
+  --(subst, new_args) <- unsuper (tyCoVarsOfTypesList args)
+  (subst, _) <- tcInstSkolTyVars unkSkol (tyCoVarsOfTypesList args)
+  --let new_args = unsuperVar <$> args
+  let tys = substTys subst args
+  let (successful, potential, _) = lookupInstEnv False inst_envs cls tys
+  let results = (fst <$> successful) ++ getPotentialUnifiers potential
+  outputTcM "results: " results
+  forM_ results (inspectResult tys)
+  return (False, False, False)
+
+inspectResult :: [Type] -> ClsInst -> TcM ()
+inspectResult tys inst = do
+  let res = tcUnifyTysFG instanceBindFun (is_tys inst) tys
+  outputTcM "  Unification result: " res
+  case res of 
+    Unifiable subst -> do
+      let tys' = substTys subst tys
+      outputTcM "  Patterns: " tys'
+      th_tys <- mapM cursedReifyType tys'
+      printLnTcM ("  TH patterns: " ++ show th_tys)
+    MaybeApart _ _ -> failTcM $ text "MaybeApart"
+    SurelyApart -> failTcM $ text "SurelyApart"
+  return ()
+
+
+cursedReifyType :: Type -> TcM TH.Type
+cursedReifyType ty = do
+ name <- newSysName (mkVarOcc "temp")
+ let tc_id = mkLocalId name OneTy ty
+ --updLclEnv (modifyLclCtxt (tcExtendLocalTypeEnv [(name, ATcId () NotLetBound)])) $ do
+ tcExtendIdEnv [tc_id] $ do
+   let th_name = mkName "temp"
+   outputTcM "thRdrNameGuesses: " (thRdrNameGuesses th_name)
+   quasi_res <- checkQuasiError $ reifyType th_name
+   case quasi_res of
+     Left _ -> failTcM $ text "this shouldn't happen"
+     Right th_ty -> do
+       case convertToHsType (Generated DoPmc) noSrcSpan th_ty of
+         Left _ -> failTcM $ text "this shouldn't happen"
+         Right ty' -> do
+           outputTcM "Round-tripped type: " ty'
+           --outputTcM "Equal? " $ eqType ty ty'
+           return th_ty
+
+--unsuperVar :: TyCoVar -> TyCoVar
+--unsuperVar v
+--  | isTcTyVar v, SkolemTv skol_info tc_lcl _ <- tcTyVarDetails v = setTcTyVarDetails v (SkolemTv skol_info tc_lcl False)
+--  | otherwise = v
+    
+
+--unsuper :: [TyCoVar] -> (Subst, [TyCoVar])
+--unsuper vars = let (s, vars') = go vars in (s, get_var <$> substTyCoVars s vars')
+--  where
+--    get_var (TyVarTy v) = v
+--    get_var _ = error "impossible"
+--
+--    go [] = (emptySubst, [])
+--    go (v : vs) | isTcTyVar v, SkolemTv skol_info tc_lcl _ <- tcTyVarDetails v = mkTcTyVar ()
+  
+  
 
 check :: Class -> Bool -> TcM (Bool, Bool, Bool)
 check cls fail_on_err = do

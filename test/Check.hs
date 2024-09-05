@@ -13,6 +13,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ImpredicativeTypes #-}
 
 module Check where
 
@@ -87,34 +88,34 @@ class TestCtxtBad (a :: Type) (n :: MyNat) where
 instance TestCtxtBad a Z
 instance (TestCtxtBad a n, Monoid a) => TestCtxtBad a (S n)
 
---instance TotalClass TestNonEx where
---  totalityEvidence = checkTotality
+--instance TotalConstraint (TestNonEx n) where
+--  _totalConstraintEvidence = checkTotality
 
---instance TotalClass TestNonADTBad where
---  totalityEvidence = checkTotality
+--instance TotalConstraint (TestNonADTBad a n) where
+--  _totalConstraintEvidence = checkTotality
 
---instance TotalClass TestNonTerm where
---  totalityEvidence = checkTotality
+--instance TotalConstraint (TestNonTerm n) where
+--  _totalConstraintEvidence = checkTotality
 
---instance TotalClass TestCtxtBad where
---  totalityEvidence = checkTotality
+--instance TotalConstraint (TestCtxtBad a n) where
+--  _totalConstraintEvidence = checkTotality
 
-instance TotalClass IsNat where
-  totalityEvidence = checkTotality
+instance TotalConstraint (IsNat n) where
+  _totalConstraintEvidence = checkTotality
 
-instance TotalClass TestMultiParam where
-  totalityEvidence = checkTotality
+instance TotalConstraint (TestMultiParam x y) where
+  _totalConstraintEvidence = checkTotality
 
-instance TotalClass TestNonADT where
-  totalityEvidence = checkTotality
+instance TotalConstraint (TestNonADT a n) where
+  _totalConstraintEvidence = checkTotality
  
 type Effect = (Type -> Type) -> (Type -> Type)
 
 class Append (xs :: [Effect]) (ys :: [Effect])
 instance Append '[] ys
 instance Append xs ys => Append (x ': xs) ys
-instance TotalClass Append where
-  totalityEvidence = checkTotality
+instance TotalConstraint (Append xs ys) where
+  _totalConstraintEvidence = checkTotality
 
 class TestPair (a :: (MyNat, MyNat)) where
 
@@ -124,15 +125,15 @@ instance TestPair '(Z, y) => TestPair '(Z, S y) where
 
 instance TestPair '(x, y) => TestPair '(S x, y)
 
-instance TotalClass TestPair where
-  totalityEvidence = checkTotality
+instance TotalConstraint (TestPair a) where
+  _totalConstraintEvidence = checkTotality
 
 --
 --class TestPartial (a :: Type) (n :: MyNat)
 --instance TestPartial Bool Z
 --instance TestPartial Bool n => TestPartial Bool (S n)
---instance TotalClass (TestPartial Bool) where
---  totalityEvidence = checkTotality
+--instance TotalConstraint (TestPartial Bool n) where
+--  _totalConstraintEvidence = checkTotality
 
 class TestRepeatBad (x :: MyNat) (y :: MyNat)
 instance TestRepeatBad x x
@@ -140,15 +141,15 @@ instance TestRepeatBad x x
 --type SingI :: forall {k}. k -> Constraint
 --class SingI a where
 --
---instance TotalClass (SingI :: MyNat -> Constraint) where
---  totalityEvidence = checkTotality
+--instance TotalConstraint (SingI (n :: MyNat)) where
+--  _totalConstraintEvidence = checkTotality
 
 testAll :: IO ()
 testAll = do
-  assertCheckResult @TestMultiParam "TestMultiParam" True  True  True
-  assertCheckResult @TestNonEx      "TestNonEx"      False True  True
-  assertCheckResult @TestNonTerm    "TestNonTerm"    True  False True
-  assertCheckResult @TestNonADT     "TestNonADT"     True  True  True
-  assertCheckResult @TestNonADTBad  "TestNonADTBad"  False True  True
-  assertCheckResult @TestCtxtBad    "TestCtxtBad"    True  True  False
+  assertCheckResult @(forall x y. TestMultiParam x y) "TestMultiParam" True  True  True
+  assertCheckResult @(forall n.   TestNonEx      n  ) "TestNonEx"      False True  True
+  assertCheckResult @(forall n.   TestNonTerm    n  ) "TestNonTerm"    True  False True
+  assertCheckResult @(forall a n. TestNonADT     a n) "TestNonADT"     True  True  True
+  assertCheckResult @(forall a n. TestNonADTBad  a n) "TestNonADTBad"  False True  True
+  assertCheckResult @(forall a n. TestCtxtBad    a n) "TestCtxtBad"    True  True  False
   --assertCheckResult @TestRepeatBad  "TestRepeatBad"    False True  True

@@ -3,7 +3,6 @@
 module TotalClassPlugin.Checker.TH ( mkEvidenceFun, mkEvidenceFun2 ) where
 
 import Language.Haskell.TH
-import TotalClassPlugin ( TotalClass )
 
 mkEvidenceFun2 :: [[Type]] -> Q [Dec]
 mkEvidenceFun2 pat_types = do
@@ -20,8 +19,6 @@ mkEvidenceFun :: Name -> Int -> Q [Dec]
 mkEvidenceFun name arity = do
   let args = VarT . mkName . ("a" ++) . show <$> [1..arity]
   --runIO $ putStrLn $ "TH name:" ++ show name
-  tc_insts <- reifyInstances ''TotalClass [VarT (mkName "a1")]
-  --runIO $ putStrLn $ "TotalClass instances:" ++ show tc_insts
   insts <- reifyInstances name args
   clauses <- mapM mkInstClause insts
   let fun_name = mkName ("evidenceFun" ++ nameBase name)

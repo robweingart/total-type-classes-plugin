@@ -14,7 +14,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResult(..), assertTotality, TotalClass(..), TotalConstraint(..), mkSecretThing, mkTotalConstraint, warnInfo) where
+module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResult(..), assertTotality, TotalConstraint(..), mkSecretThing, mkTotalConstraint, warnInfo) where
 
 import Data.Kind (Constraint)
 import qualified Data.Kind
@@ -45,21 +45,18 @@ class CheckTotality (c :: ck) where
 class IsClassKind ck => TotalClass (c :: ck) where
   totalityEvidence :: TotalityEvidence c
 
-instance TotalClass KnownNat where
-  totalityEvidence = assertTotality
-
-instance TotalClass KnownChar where
-  totalityEvidence = assertTotality
-
-instance TotalClass KnownSymbol where
-  totalityEvidence = assertTotality
-
 type TotalConstraint :: Constraint -> Constraint
 
 class TotalConstraint c where
   _totalConstraintEvidence :: TotalityEvidence c
 
 instance TotalConstraint (KnownNat n) where
+  _totalConstraintEvidence = assertTotality
+
+instance TotalConstraint (KnownChar c) where
+  _totalConstraintEvidence = assertTotality
+
+instance TotalConstraint (KnownSymbol s) where
   _totalConstraintEvidence = assertTotality
 
 secretInternal :: String

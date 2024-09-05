@@ -7,39 +7,39 @@ import GHC.Plugins
 import GHC.Tc.Plugin
 import GHC.Tc.Types.Evidence (EvTerm (EvExpr))
 import GHC.Tc.Types.Constraint (Ct, ctPred, ctLoc)
-import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds), modifyLclCtxt, TcTyThing (ATcId), IdBindingInfo (NotLetBound), TcLclEnv)
-import GHC (Class, GhcPs, LHsDecl)
+import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds))
+import GHC (Class)
 import Data.Maybe (mapMaybe, maybeToList)
 import GHC.Core.Class (Class(classTyCon, className))
 import GHC.ThToHs (convertToHsDecls, convertToHsType, thRdrNameGuesses)
 import GHC.Rename.Module (findSplice)
 import GHC.Tc.Module (rnTopSrcDecls, tcTopSrcDecls)
 import GHC.Tc.Solver (captureTopConstraints)
-import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, failWithTc, setCtLocM, tryTc, mapAndUnzipM, newSysName, updLclEnv)
+import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, failWithTc, setCtLocM, tryTc, mapAndUnzipM, newSysName, newSysLocalId)
 import GHC.HsToCore.Monad (initDsTc)
 import GHC.HsToCore.Binds (dsTopLHsBinds)
 import GHC.Tc.Zonk.Type (zonkTopDecls)
 import GHC.Data.Bag (emptyBag)
 import GHC.Tc.Errors.Types (TcRnMessage (TcRnTHError), THError (THSpliceFailed), SpliceFailReason (..))
-import TotalClassPlugin.Checker.TH (mkEvidenceFun)
+import TotalClassPlugin.Checker.TH (mkEvidenceFun, mkEvidenceFun2)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH (mkName, reifyType)
 import GHC.Core.Predicate (Pred(..), classifyPredType)
-import GHC.Core.InstEnv (classInstances, ClsInst (is_dfun, is_dfun_name, is_tys), InstEnvs (ie_global, ie_local), memberInstEnv, lookupInstEnv, getPotentialUnifiers, instanceBindFun)
-import GHC.Tc.Utils.Env (tcGetInstEnvs, tcExtendLocalTypeEnv, tcExtendIdEnv)
+import GHC.Core.InstEnv (classInstances, ClsInst (..), lookupInstEnv, getPotentialUnifiers, instanceBindFun)
+import GHC.Tc.Utils.Env (tcGetInstEnvs, tcExtendIdEnv)
 import TotalClassPlugin.Checker.Errors (checkDsResult, TotalClassCheckerMessage (TotalCheckerInvalidContext), checkTcRnResult, failWithTotal, checkPaterson, checkQuasiError)
 import GHC.Data.Maybe (listToMaybe)
 import TotalClassPlugin.GHCUtils (checkInstTermination, splitInstTyForValidity)
-import Data.Data (Data)
-import GHC.Hs.Dump (showAstData, BlankSrcSpan (..), BlankEpAnnotations (..), showAstDataFull)
-import TotalClassPlugin.Rewriter.Utils (outputTcM, outputFullTcM, failTcM, printLnTcM)
-import GHC.Tc.Utils.TcType (isOverlappableTyVar, tyCoVarsOfTypesList, TcTyVarDetails (..), eqType)
-import GHC.Core.TyCo.Rep (Type(..))
-import Control.Monad (forM_)
-import GHC.Core.TyCo.Subst (substTyCoVars)
-import GHC.Tc.Utils.Instantiate (tcInstSkolTyVars)
+import TotalClassPlugin.Rewriter.Utils (outputTcM, outputFullTcM, failTcM)
+import GHC.Tc.Utils.TcType (tyCoVarsOfTypesList)
+import GHC.Tc.Utils.Instantiate (tcInstSkolTyVars, instDFunType)
 import GHC.Tc.Types.Origin (unkSkol)
 import GHC.Core.Unify (tcUnifyTysFG, UnifyResultM (..))
+import GHC.Core.TyCo.Rep (Type(..))
+import Data.Foldable (Foldable(toList))
+import Language.Haskell.TH.Syntax (mkNameU)
+import GHC.Types.Unique (getKey)
+import Data.Functor.Compose (Compose(Compose, getCompose))
 
 getCheckClass :: TcPluginM Class
 getCheckClass = do
@@ -115,35 +115,63 @@ checkConstraint cls args fail_on_err = do
   inst_envs <- tcGetInstEnvs
   --outputTcM "Insts: " $ classInstances inst_envs cls
   --(subst, new_args) <- unsuper (tyCoVarsOfTypesList args)
-  (subst, _) <- tcInstSkolTyVars unkSkol (tyCoVarsOfTypesList args)
+  let vars = tyCoVarsOfTypesList args
+  (subst, vars') <- tcInstSkolTyVars unkSkol vars
   --let new_args = unsuperVar <$> args
   let tys = substTys subst args
   let (successful, potential, _) = lookupInstEnv False inst_envs cls tys
   let results = (fst <$> successful) ++ getPotentialUnifiers potential
   outputTcM "results: " results
-  forM_ results (inspectResult tys)
-  return (False, False, False)
+  --forM_ results (inspectResult (TyVarTy <$> vars'))
+  (term_res_list, types) <- unzip <$> mapM (check_instance fail_on_err tys vars') results
+  let term_res = all id term_res_list
+  ev_fun <- withThTypes (Compose types) (mkEvidenceFun2 . getCompose)
+  mb_ex_err <- either (return . Just) (check_evidence_fun cls) ev_fun
+  ex_res <- res_or_fail fail_on_err mb_ex_err
+  return (ex_res, term_res, False)
+  where
 
-inspectResult :: [Type] -> ClsInst -> TcM ()
-inspectResult tys inst = do
+check_instance :: Bool -> [Type] -> [TyVar] -> ClsInst -> TcM (Bool, [Type])
+check_instance fail_on_err tys vars inst = do
+  term_res <- check_termination inst >>= res_or_fail fail_on_err
   let res = tcUnifyTysFG instanceBindFun (is_tys inst) tys
   outputTcM "  Unification result: " res
   case res of 
-    Unifiable subst -> do
-      let tys' = substTys subst tys
-      outputTcM "  Patterns: " tys'
-      th_tys <- mapM cursedReifyType tys'
-      printLnTcM ("  TH patterns: " ++ show th_tys)
-    MaybeApart _ _ -> failTcM $ text "MaybeApart"
-    SurelyApart -> failTcM $ text "SurelyApart"
-  return ()
+    Unifiable subst_inst -> do
+      let mb = map (lookupTyVar subst_inst) (is_tvs inst)   
+      (_, cxt) <- instDFunType (is_dfun inst) mb
+      outputTcM "  Context: " cxt
+      let patterns = substTys subst_inst (TyVarTy <$> vars)
+      outputTcM "  Patterns: " patterns
+      return (term_res, patterns)
+      --th_res <- withThTypes patterns return
+      --case th_res of
+      --  Left _ -> failTcM $ text "bug! type conversion failed"
+      --  Right th_pats -> do
+      --    printLnTcM $ "  TH patterns: " ++ show th_pats
+      --    return (term_res, th_pats)
+    MaybeApart _ _ -> failTcM $ text "bug! instance returned from lookup is MaybeApart"
+    SurelyApart -> failTcM $ text "bug! instance returned from lookup is SurelyApart"
 
+res_or_fail :: Bool -> Maybe TotalClassCheckerMessage -> TcM Bool
+res_or_fail True (Just m) = failWithTotal m
+res_or_fail False (Just _) = return False
+res_or_fail _ Nothing = return True
+
+check_termination :: ClsInst -> TcM (Maybe TotalClassCheckerMessage)
+check_termination = checkPaterson . tryTc . uncurry checkInstTermination . splitInstTyForValidity . idType . is_dfun
+
+withThTypes :: Traversable t => t Type -> (t TH.Type -> TH.Q a) -> TcM (Either TotalClassCheckerMessage a)
+withThTypes types thing_inside = do
+  ty_ids <- mapM (newSysLocalId (fsLit "temp") OneTy) types
+  tcExtendIdEnv (toList ty_ids) $ checkQuasiError $ do
+    th_types <- mapM (reifyType . mkNameU "temp" . toInteger . getKey . idUnique) ty_ids
+    thing_inside th_types
 
 cursedReifyType :: Type -> TcM TH.Type
 cursedReifyType ty = do
  name <- newSysName (mkVarOcc "temp")
  let tc_id = mkLocalId name OneTy ty
- --updLclEnv (modifyLclCtxt (tcExtendLocalTypeEnv [(name, ATcId () NotLetBound)])) $ do
  tcExtendIdEnv [tc_id] $ do
    let th_name = mkName "temp"
    outputTcM "thRdrNameGuesses: " (thRdrNameGuesses th_name)
@@ -201,42 +229,26 @@ check cls fail_on_err = do
 
     check_context theta tau = mapMaybe (check_pred_type tau) theta
 
+check_evidence_fun :: Class -> [TH.Dec] -> TcM (Maybe TotalClassCheckerMessage)
+check_evidence_fun cls decs = do
+  binds <- checkTcRnResult $ tryTc $ do
+    ev_fun_binds <- case convertToHsDecls (Generated DoPmc) noSrcSpan decs of
+      Left err -> failWithTc $ TcRnTHError (THSpliceFailed (RunSpliceFailure err))
+      Right ev_fun_binds -> return ev_fun_binds
+    (group, Nothing) <- findSplice ev_fun_binds
+    (gbl_rn, rn_group) <- updGblEnv (\env -> env{tcg_binds=emptyBag}) $ rnTopSrcDecls group
+    ((gbl_tc, _), _) <- captureTopConstraints $ setGblEnv gbl_rn $ tcTopSrcDecls rn_group
+    (_, _, binds, _, _, _) <- setGblEnv gbl_tc $ zonkTopDecls emptyBag (tcg_binds gbl_tc) [] [] [] 
+    return binds
+  checkDsResult cls $ updTopFlags (flip wopt_set Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds
 
 check_exhaustiveness :: Class -> TcM (Maybe TotalClassCheckerMessage)
 check_exhaustiveness cls = do
   let name = mkName $ occNameString $ nameOccName $ className cls
-  --let match_on = mapMaybe match_on_bndr $ tyConBinders (classTyCon cls)
   let arity = length $ tyConBinders (classTyCon cls)
-  th_res <- checkQuasiError (mkEvidenceFun name arity)
-  case th_res of
+  checkQuasiError (mkEvidenceFun name arity) >>= \case
     Left err -> return (Just err)
-    Right ev_fun_dec -> do
-      binds <- checkTcRnResult $ tryTc $ do
-        ev_fun_binds <- case convertToHsDecls (Generated DoPmc) noSrcSpan ev_fun_dec of
-          Left err -> failWithTc $ TcRnTHError (THSpliceFailed (RunSpliceFailure err))
-          Right ev_fun_binds -> return ev_fun_binds
-        --outputFullTcM "ev_fun_binds: " ev_fun_binds
-        (group, Nothing) <- findSplice ev_fun_binds
-        --outputFullTcM "parsed group: " group
-        (gbl_rn, rn_group) <- updGblEnv (\env -> env{tcg_binds=emptyBag}) $ rnTopSrcDecls group
-        --outputFullTcM "renamed group: " rn_group
-        ((gbl_tc, _), _) <- captureTopConstraints $ setGblEnv gbl_rn $ tcTopSrcDecls rn_group
-        (_, _, binds, _, _, _) <- setGblEnv gbl_tc $ zonkTopDecls emptyBag (tcg_binds gbl_tc) [] [] [] 
-        return binds
-      checkDsResult cls $ updTopFlags (flip wopt_set Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds
-  where
-    outputFullTcM :: Data a => String -> a -> TcM ()
-    outputFullTcM str x = do
-      dFlags <- getDynFlags
-      liftIO $ putStrLn $ str ++ showSDoc dFlags (showAstData BlankSrcSpan BlankEpAnnotations x)
-  --where
-  --  match_on_bndr (Bndr _ (NamedTCB _)) = Nothing
-  --  match_on_bndr (Bndr var AnonTCB) = Just $ isAlgType (tyVarKind var)
---
---mk_ps_ev_fun :: Class -> TcM (LHsDecl GhcPs)
---mk_ps_ev_fun cls = do
---  return 
-
+    Right decs -> check_evidence_fun cls decs
 
 mk_check_inst :: Type -> Class -> TcPluginM EvTerm
 mk_check_inst ck cls = do

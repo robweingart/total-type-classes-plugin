@@ -1,9 +1,20 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module TotalClassPlugin.Checker.TH ( mkEvidenceFun ) where
+module TotalClassPlugin.Checker.TH ( mkEvidenceFun, mkEvidenceFun2 ) where
 
 import Language.Haskell.TH
 import TotalClassPlugin ( TotalClass )
+
+mkEvidenceFun2 :: [[Type]] -> Q [Dec]
+mkEvidenceFun2 pat_types = do
+  clauses <- mapM mk_inst pat_types
+  return [FunD (mkName "evidenceFun") clauses]
+
+mk_inst :: [Type] -> Q Clause
+mk_inst pat_types = do
+  pats <- demoteToPats pat_types
+  body <- [| () |]
+  return $ Clause pats (NormalB body) []
 
 mkEvidenceFun :: Name -> Int -> Q [Dec]
 mkEvidenceFun name arity = do

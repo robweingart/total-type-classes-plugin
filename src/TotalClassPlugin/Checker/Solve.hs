@@ -8,14 +8,14 @@ import GHC.Tc.Plugin
 import GHC.Tc.Types.Evidence (EvTerm (EvExpr))
 import GHC.Tc.Types.Constraint (Ct, ctPred, ctLoc)
 import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds))
-import GHC (Class)
+import GHC (Class, instanceDFunId)
 import Data.Maybe (mapMaybe, maybeToList)
 import GHC.Core.Class (Class(classTyCon, className))
 import GHC.ThToHs (convertToHsDecls, convertToHsType, thRdrNameGuesses)
 import GHC.Rename.Module (findSplice)
 import GHC.Tc.Module (rnTopSrcDecls, tcTopSrcDecls)
 import GHC.Tc.Solver (captureTopConstraints)
-import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, failWithTc, setCtLocM, tryTc, mapAndUnzipM, newSysName, newSysLocalId)
+import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, failWithTc, setCtLocM, tryTc, mapAndUnzipM, newSysName, newSysLocalId, mapAndUnzip3M)
 import GHC.HsToCore.Monad (initDsTc)
 import GHC.HsToCore.Binds (dsTopLHsBinds)
 import GHC.Tc.Zonk.Type (zonkTopDecls)
@@ -27,10 +27,10 @@ import Language.Haskell.TH (mkName, reifyType)
 import GHC.Core.Predicate (Pred(..), classifyPredType)
 import GHC.Core.InstEnv (classInstances, ClsInst (..), lookupInstEnv, getPotentialUnifiers, instanceBindFun)
 import GHC.Tc.Utils.Env (tcGetInstEnvs, tcExtendIdEnv)
-import TotalClassPlugin.Checker.Errors (checkDsResult, TotalClassCheckerMessage (TotalCheckerInvalidContext), checkTcRnResult, failWithTotal, checkPaterson, checkQuasiError)
+import TotalClassPlugin.Checker.Errors (checkDsResult, TotalClassCheckerMessage (..), checkTcRnResult, failWithTotal, checkPaterson, checkQuasiError)
 import GHC.Data.Maybe (listToMaybe)
 import TotalClassPlugin.GHCUtils (checkInstTermination, splitInstTyForValidity)
-import TotalClassPlugin.Rewriter.Utils (outputTcM, outputFullTcM, failTcM)
+import TotalClassPlugin.Rewriter.Utils (outputTcM, failTcM)
 import GHC.Tc.Utils.TcType (tyCoVarsOfTypesList)
 import GHC.Tc.Utils.Instantiate (tcInstSkolTyVars, instDFunType)
 import GHC.Tc.Types.Origin (unkSkol)
@@ -105,34 +105,30 @@ solveCheck' ct = case classifyPredType (ctPred ct) of
 
 checkConstraint :: Class -> [Type] -> Bool -> TcM (Bool, Bool, Bool)
 checkConstraint cls args fail_on_err = do
-  outputTcM "Class: " cls
-  outputFullTcM "args: " args
-  --forM_ args $ \case
-  --  TyVarTy v -> do
-  --    outputTcM "overlappable? " $ isOverlappableTyVar v
-  --    outputTcM "details: " $ tcTyVarDetails v
-  --  _ -> return ()
-  inst_envs <- tcGetInstEnvs
-  --outputTcM "Insts: " $ classInstances inst_envs cls
-  --(subst, new_args) <- unsuper (tyCoVarsOfTypesList args)
-  let vars = tyCoVarsOfTypesList args
-  (subst, vars') <- tcInstSkolTyVars unkSkol vars
-  --let new_args = unsuperVar <$> args
-  let tys = substTys subst args
-  let (successful, potential, _) = lookupInstEnv False inst_envs cls tys
-  let results = (fst <$> successful) ++ getPotentialUnifiers potential
-  outputTcM "results: " results
-  --forM_ results (inspectResult (TyVarTy <$> vars'))
-  (term_res_list, types) <- unzip <$> mapM (check_instance fail_on_err tys vars') results
+  (vars, tys) <- inst_vars args
+  results <- get_all_unifiers cls tys
+  let initial_ids = mkUniqSet $ map instanceDFunId results
+  (term_res_list, cxt_res_list, types) <- mapAndUnzip3M (check_instance fail_on_err cls tys vars initial_ids) results
   let term_res = all id term_res_list
+  let cxt_res = all id cxt_res_list
   ev_fun <- withThTypes (Compose types) (mkEvidenceFun2 . getCompose)
   mb_ex_err <- either (return . Just) (check_evidence_fun cls) ev_fun
   ex_res <- res_or_fail fail_on_err mb_ex_err
-  return (ex_res, term_res, False)
-  where
+  return (ex_res, term_res, cxt_res)
 
-check_instance :: Bool -> [Type] -> [TyVar] -> ClsInst -> TcM (Bool, [Type])
-check_instance fail_on_err tys vars inst = do
+inst_vars :: [Type] -> TcM ([TcTyVar], [Type])
+inst_vars tys = do
+  (subst, vars) <- tcInstSkolTyVars unkSkol (tyCoVarsOfTypesList tys)
+  return (vars, substTys subst tys)
+
+get_all_unifiers :: Class -> [Type] -> TcM [ClsInst]
+get_all_unifiers cls tys = do
+  inst_envs <- tcGetInstEnvs
+  let (successful, potential, _) = lookupInstEnv False inst_envs cls tys
+  return $ (fst <$> successful) ++ getPotentialUnifiers potential
+
+check_instance :: Bool -> Class -> [Type] -> [TyVar] -> UniqSet Id -> ClsInst -> TcM (Bool, Bool, [Type])
+check_instance fail_on_err cls tys vars initial_ids inst = do
   term_res <- check_termination inst >>= res_or_fail fail_on_err
   let res = tcUnifyTysFG instanceBindFun (is_tys inst) tys
   outputTcM "  Unification result: " res
@@ -140,18 +136,25 @@ check_instance fail_on_err tys vars inst = do
     Unifiable subst_inst -> do
       let mb = map (lookupTyVar subst_inst) (is_tvs inst)   
       (_, cxt) <- instDFunType (is_dfun inst) mb
-      outputTcM "  Context: " cxt
+      let cxt' = substTheta subst_inst cxt
+      outputTcM "  Context: " cxt'
+      cxt_res <- all id <$> mapM (check_cxt_constraint fail_on_err cls inst initial_ids) cxt'
       let patterns = substTys subst_inst (TyVarTy <$> vars)
       outputTcM "  Patterns: " patterns
-      return (term_res, patterns)
-      --th_res <- withThTypes patterns return
-      --case th_res of
-      --  Left _ -> failTcM $ text "bug! type conversion failed"
-      --  Right th_pats -> do
-      --    printLnTcM $ "  TH patterns: " ++ show th_pats
-      --    return (term_res, th_pats)
+      return (term_res, cxt_res, patterns)
     MaybeApart _ _ -> failTcM $ text "bug! instance returned from lookup is MaybeApart"
     SurelyApart -> failTcM $ text "bug! instance returned from lookup is SurelyApart"
+
+check_cxt_constraint :: Bool -> Class -> ClsInst -> UniqSet Id -> PredType -> TcM Bool
+check_cxt_constraint fail_on_err cls inst initial_ids pred_ty 
+  | ClassPred cls' tys <- classifyPredType pred_ty = if
+    | cls' == cls -> do
+      (_, tys') <- inst_vars tys
+      inst_ids <- (mkUniqSet . map instanceDFunId) <$> get_all_unifiers cls tys'
+      let escaping_ids = minusUniqSet inst_ids (initial_ids)
+      if isEmptyUniqSet escaping_ids then return True else res_or_fail fail_on_err $ Just TotalError
+    | otherwise ->  res_or_fail fail_on_err $ Just (TotalCheckerInvalidContext pred_ty (idType (instanceDFunId inst)))
+  | otherwise = failTcM $ text "non-class constraints not supported"
 
 res_or_fail :: Bool -> Maybe TotalClassCheckerMessage -> TcM Bool
 res_or_fail True (Just m) = failWithTotal m
@@ -185,23 +188,6 @@ cursedReifyType ty = do
            outputTcM "Round-tripped type: " ty'
            --outputTcM "Equal? " $ eqType ty ty'
            return th_ty
-
---unsuperVar :: TyCoVar -> TyCoVar
---unsuperVar v
---  | isTcTyVar v, SkolemTv skol_info tc_lcl _ <- tcTyVarDetails v = setTcTyVarDetails v (SkolemTv skol_info tc_lcl False)
---  | otherwise = v
-    
-
---unsuper :: [TyCoVar] -> (Subst, [TyCoVar])
---unsuper vars = let (s, vars') = go vars in (s, get_var <$> substTyCoVars s vars')
---  where
---    get_var (TyVarTy v) = v
---    get_var _ = error "impossible"
---
---    go [] = (emptySubst, [])
---    go (v : vs) | isTcTyVar v, SkolemTv skol_info tc_lcl _ <- tcTyVarDetails v = mkTcTyVar ()
-  
-  
 
 check :: Class -> Bool -> TcM (Bool, Bool, Bool)
 check cls fail_on_err = do

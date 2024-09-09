@@ -1,5 +1,6 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 
 module TotalClassPlugin.Checker.Solve ( solveCheck ) where
 
@@ -9,28 +10,25 @@ import GHC.Tc.Types.Evidence (EvTerm (EvExpr))
 import GHC.Tc.Types.Constraint (Ct, ctPred, ctLoc)
 import GHC.Tc.Types (TcM, TcGblEnv (tcg_binds))
 import GHC (Class, instanceDFunId)
-import Data.Maybe (mapMaybe, maybeToList)
-import GHC.Core.Class (Class(classTyCon, className))
-import GHC.ThToHs (convertToHsDecls, convertToHsType, thRdrNameGuesses)
+import GHC.ThToHs (convertToHsDecls)
 import GHC.Rename.Module (findSplice)
 import GHC.Tc.Module (rnTopSrcDecls, tcTopSrcDecls)
 import GHC.Tc.Solver (captureTopConstraints)
-import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, failWithTc, setCtLocM, tryTc, mapAndUnzipM, newSysName, newSysLocalId, mapAndUnzip3M)
+import GHC.Tc.Utils.Monad (setGblEnv, updTopFlags, updGblEnv, failWithTc, setCtLocM, tryTc, newSysLocalId)
 import GHC.HsToCore.Monad (initDsTc)
 import GHC.HsToCore.Binds (dsTopLHsBinds)
 import GHC.Tc.Zonk.Type (zonkTopDecls)
 import GHC.Data.Bag (emptyBag)
 import GHC.Tc.Errors.Types (TcRnMessage (TcRnTHError), THError (THSpliceFailed), SpliceFailReason (..))
-import TotalClassPlugin.Checker.TH (mkEvidenceFun, mkEvidenceFun2)
+import TotalClassPlugin.Checker.TH (mkEvidenceFun)
 import qualified Language.Haskell.TH as TH
-import Language.Haskell.TH (mkName, reifyType)
+import Language.Haskell.TH (reifyType)
 import GHC.Core.Predicate (Pred(..), classifyPredType)
-import GHC.Core.InstEnv (classInstances, ClsInst (..), lookupInstEnv, getPotentialUnifiers, instanceBindFun)
+import GHC.Core.InstEnv (ClsInst (..), lookupInstEnv, getPotentialUnifiers, instanceBindFun)
 import GHC.Tc.Utils.Env (tcGetInstEnvs, tcExtendIdEnv)
 import TotalClassPlugin.Checker.Errors (checkDsResult, TotalClassCheckerMessage (..), checkTcRnResult, failWithTotal, checkPaterson, checkQuasiError)
-import GHC.Data.Maybe (listToMaybe)
 import TotalClassPlugin.GHCUtils (checkInstTermination, splitInstTyForValidity)
-import TotalClassPlugin.Rewriter.Utils (outputTcM, failTcM)
+import TotalClassPlugin.Rewriter.Utils (failTcM)
 import GHC.Tc.Utils.TcType (tyCoVarsOfTypesList)
 import GHC.Tc.Utils.Instantiate (tcInstSkolTyVars, instDFunType)
 import GHC.Tc.Types.Origin (unkSkol)
@@ -41,6 +39,8 @@ import Language.Haskell.TH.Syntax (mkNameU)
 import GHC.Types.Unique (getKey)
 import Data.Functor.Compose (Compose(Compose, getCompose))
 import Control.Monad.State (StateT (..), get, MonadState (..), lift)
+import GHC.Core.Class (classTyCon)
+import TotalClassPlugin (CheckTotality)
 
 getCheckClass :: TcPluginM Class
 getCheckClass = do
@@ -61,34 +61,21 @@ getTotalityEvidenceType = do
   tcLookupTyCon name
 
 solveCheck :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
-solveCheck ct = do
-  --tcPluginIO $ putStrLn ("solveCheck " ++ showPprUnsafe ct)
-  solveCheck' ct
-
-solveCheck' :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
-solveCheck' ct = case classifyPredType (ctPred ct) of
-  ClassPred targetClass tys -> do
+solveCheck ct = case classifyPredType (ctPred ct) of
+  ClassPred targetClass [ck, c] -> do
     checkClass <- getCheckClass
     checkResultClass <- getCheckResultClass
-    let maybe_fail_on_err = if | targetClass == checkClass -> Just True
-                               | targetClass == checkResultClass -> Just False
-                               | otherwise -> Nothing
-    case maybe_fail_on_err of
-      Nothing -> do 
-        return Nothing
-      Just fail_on_err -> case tys of
-        [ck, c] -> check_inner ct ck c fail_on_err
-        _ -> return Nothing
+    if | targetClass == checkClass ->       check_inner ct ck c True
+       | targetClass == checkResultClass -> check_inner ct ck c False
+       | otherwise -> return Nothing
   _ -> do
-    tcPluginIO $ putStrLn "not a class predicate"
     return Nothing
 
 check_inner :: Ct -> Type -> PredType -> Bool -> TcPluginM (Maybe (EvTerm, Ct))
 check_inner ct ck c fail_on_err = case classifyPredType c of
   ForAllPred _ _ inner -> check_inner ct ck inner fail_on_err
   ClassPred cls args -> do
-    let do_check = case args of { [] -> check cls fail_on_err; _ -> checkConstraint cls args fail_on_err }
-    res <- unsafeTcPluginTcM (setCtLocM (ctLoc ct) do_check)
+    res <- unsafeTcPluginTcM (setCtLocM (ctLoc ct) $ checkConstraint cls args fail_on_err)
     ev_term <- if fail_on_err
       then mk_check_inst ck cls
       else mk_check_result_inst ck cls res
@@ -120,11 +107,12 @@ checkConstraint cls args fail_on_err = runStateT (checkConstraint' cls args) ini
 
 checkConstraint' :: Class -> [Type] -> CM ()
 checkConstraint' cls args = do
+  let x = ''CheckTotality
   (vars, tys) <- lift $ inst_vars args
   results <- lift $ get_all_unifiers cls tys
   let initial_ids = mkUniqSet $ map instanceDFunId results
   types <- mapM (check_instance cls tys vars initial_ids) results
-  ev_fun <- lift $ withThTypes (Compose types) (mkEvidenceFun2 . getCompose)
+  ev_fun <- lift $ withThTypes (Compose types) (mkEvidenceFun . getCompose)
   mb_ex_err <- either (return . Just) (lift . check_evidence_fun cls) ev_fun
   maybeFailCM Exhaustiveness mb_ex_err
 
@@ -175,32 +163,6 @@ withThTypes types thing_inside = do
     th_types <- mapM (reifyType . mkNameU "temp" . toInteger . getKey . idUnique) ty_ids
     thing_inside th_types
 
-check :: Class -> Bool -> TcM (Bool, Bool, Bool)
-check cls fail_on_err = do
-  maybe_ex_msg <- check_exhaustiveness cls
-  ex_res <- res_or_fail maybe_ex_msg
-  inst_envs <- tcGetInstEnvs
-  (term_msgss, ctxt_msgss) <- mapAndUnzipM check_inst (classInstances inst_envs cls)
-  term_res <- res_or_fail (listToMaybe (concat term_msgss))
-  ctxt_res <- res_or_fail (listToMaybe (concat ctxt_msgss))
-  return (ex_res, term_res, ctxt_res)
-  where
-    res_or_fail (Just m) = if fail_on_err then failWithTotal m else return False
-    res_or_fail Nothing = return True
-
-    check_inst inst = do
-      let dfun_type = idType $ is_dfun inst
-      let (theta, tau) = splitInstTyForValidity dfun_type
-      term_res <- checkPaterson $ tryTc $ checkInstTermination theta tau
-      let ctxt_res = check_context theta tau
-      return (maybeToList term_res, ctxt_res)
-
-    check_pred_type tau pred_ty = case classifyPredType pred_ty of
-      ClassPred cls' _ | cls == cls' -> Nothing
-      _ -> Just (TotalCheckerInvalidContext tau pred_ty)
-
-    check_context theta tau = mapMaybe (check_pred_type tau) theta
-
 check_evidence_fun :: Class -> [TH.Dec] -> TcM (Maybe TotalClassCheckerMessage)
 check_evidence_fun cls decs = do
   binds <- checkTcRnResult $ tryTc $ do
@@ -213,14 +175,6 @@ check_evidence_fun cls decs = do
     (_, _, binds, _, _, _) <- setGblEnv gbl_tc $ zonkTopDecls emptyBag (tcg_binds gbl_tc) [] [] [] 
     return binds
   checkDsResult cls $ updTopFlags (flip wopt_set Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds
-
-check_exhaustiveness :: Class -> TcM (Maybe TotalClassCheckerMessage)
-check_exhaustiveness cls = do
-  let name = mkName $ occNameString $ nameOccName $ className cls
-  let arity = length $ tyConBinders (classTyCon cls)
-  checkQuasiError (mkEvidenceFun name arity) >>= \case
-    Left err -> return (Just err)
-    Right decs -> check_evidence_fun cls decs
 
 mk_check_inst :: Type -> Class -> TcPluginM EvTerm
 mk_check_inst ck cls = do

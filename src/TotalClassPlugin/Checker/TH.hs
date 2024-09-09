@@ -1,11 +1,11 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module TotalClassPlugin.Checker.TH ( mkEvidenceFun, mkEvidenceFun2 ) where
+module TotalClassPlugin.Checker.TH ( mkEvidenceFun ) where
 
 import Language.Haskell.TH
 
-mkEvidenceFun2 :: [[Type]] -> Q [Dec]
-mkEvidenceFun2 pat_types = do
+mkEvidenceFun :: [[Type]] -> Q [Dec]
+mkEvidenceFun pat_types = do
   clauses <- mapM mk_inst pat_types
   return [FunD (mkName "evidenceFun") clauses]
 
@@ -14,26 +14,6 @@ mk_inst pat_types = do
   pats <- demoteToPats pat_types
   body <- [| () |]
   return $ Clause pats (NormalB body) []
-
-mkEvidenceFun :: Name -> Int -> Q [Dec]
-mkEvidenceFun name arity = do
-  let args = VarT . mkName . ("a" ++) . show <$> [1..arity]
-  --runIO $ putStrLn $ "TH name:" ++ show name
-  insts <- reifyInstances name args
-  clauses <- mapM mkInstClause insts
-  let fun_name = mkName ("evidenceFun" ++ nameBase name)
-  return [FunD fun_name clauses]
-
-mkInstClause :: InstanceDec -> Q Clause
-mkInstClause (InstanceD _ _ t _) = do
-  let args = get_args t []
-  pats <- demoteToPats args
-  body <- [| () |]
-  return $ Clause pats (NormalB body) []
-  where
-    get_args (AppT f x) args = get_args f (x : args) 
-    get_args _ args = args
-mkInstClause _ = fail "Not an instance"
 
 demoteToPats :: [Type] -> Q [Pat]
 demoteToPats ts = mapM demoteToPat ts

@@ -16,7 +16,6 @@ lookupClassByName str = do
   name <- lookupOrig md (mkTcOcc str)
   tcLookupClass name
 
-
 isClassPred :: Class -> Ct -> Bool
 isClassPred cls ct
   | Just (cls', _) <- getClassPredTys_maybe (ctPred ct) = cls == cls'
@@ -32,28 +31,6 @@ solveWithPlaceholder ct = do
     (wc, _) <- unsafeTcPluginTcM $ runTcS $ solveWanteds (mkSimpleWC [ctEvidence newCt])
     if isSolvedWC wc
     then do 
-      tcPluginIO $ putStrLn ("Inserting placeholder:" ++ showPprUnsafe predType)
+      --tcPluginIO $ putStrLn ("Inserting placeholder:" ++ showPprUnsafe predType)
       return $ Just (mkPlaceholder predType, ct)
-    else solveWithPlaceholder' ct
-
-solveWithPlaceholder' :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
-solveWithPlaceholder' ct
-  | Just (targetClass, _) <- getClassPredTys_maybe $ ctPred ct = do
-    tcPluginIO $ putStrLn ("Trying to solve:" ++ showPprUnsafe ct)
-    totalClass <- lookupClassByName "TotalClass"
-    if targetClass == totalClass
-    then do
-      tcPluginIO $ putStrLn ("This is TotalClass, skipping:" ++ showPprUnsafe targetClass)
-      return Nothing
-    else do
-      let targetTyConTy = mkTyConTy $ classTyCon targetClass
-      let predType = mkTyConApp (classTyCon totalClass) [typeKind targetTyConTy, targetTyConTy] 
-      newCt <- mkNonCanonical <$> newWanted (ctLoc ct) predType
-      (wc, _) <- unsafeTcPluginTcM $ runTcS $ solveWanteds (mkSimpleWC [ctEvidence newCt])
-      if isSolvedWC wc
-      then do 
-        tcPluginIO $ putStrLn ("Inserting placeholder:" ++ showPprUnsafe predType)
-        return $ Just (mkPlaceholder predType, ct)
-      else return Nothing
-  | otherwise = return Nothing
-
+    else return Nothing

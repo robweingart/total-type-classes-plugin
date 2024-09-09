@@ -36,7 +36,7 @@ rewriteCalls ids binds cont
     printLnTcM "No new modified ids, ending loop"
     getEnvs
   | otherwise = do
-    forM_ ids (outputTcM "")
+    --forM_ ids (outputTcM "")
     (binds', lie) <- captureTopConstraints $ rewriteCallsIn ids binds
     (gbl, lcl) <- getEnvs
     new_ev_binds <- restoreEnvs (gbl, lcl) $ simplifyTop lie

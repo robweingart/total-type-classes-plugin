@@ -88,6 +88,11 @@ class TestCtxtBad (a :: Type) (n :: MyNat) where
 instance TestCtxtBad a Z
 instance (TestCtxtBad a n, Monoid a) => TestCtxtBad a (S n)
 
+class TestEscape (a :: Type) (n :: MyNat) where
+--instance TestEscape Bool n
+instance TestEscape Int Z
+instance (TestEscape Bool n) => TestEscape Int (S n)
+
 --instance TotalConstraint (TestNonEx n) where
 --  _totalConstraintEvidence = checkTotality
 
@@ -152,4 +157,5 @@ testAll = do
   assertCheckResult @(forall a n. TestNonADT     a n) "TestNonADT"     True  True  True
   assertCheckResult @(forall a n. TestNonADTBad  a n) "TestNonADTBad"  False True  True
   assertCheckResult @(forall a n. TestCtxtBad    a n) "TestCtxtBad"    True  True  False
+  assertCheckResult @(forall a n. TestEscape   Int n) "TestEscape"    True  True  False
   --assertCheckResult @TestRepeatBad  "TestRepeatBad"    False True  True

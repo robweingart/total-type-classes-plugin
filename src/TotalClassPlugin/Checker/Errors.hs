@@ -15,7 +15,6 @@ import GHC.Utils.Error (Diagnostic (..), noHints)
 import GHC.Types.Error (mkSimpleDecorated, NoDiagnosticOpts (NoDiagnosticOpts), unionDecoratedSDoc, HasDefaultDiagnosticOpts (defaultOpts), MsgEnvelope (..), Messages (..))
 import GHC.Data.Bag (mapMaybeBag, headMaybe, partitionBagWith)
 import GHC.Core.Class (Class (..))
-import TotalClassPlugin.Rewriter.Utils
 import Language.Haskell.TH (Q)
 import GHC.Tc.Gen.Splice (runQuasi)
 

@@ -8,7 +8,7 @@ import Data.Foldable (forM_, Foldable (toList))
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef, TcLclEnv)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), isIdHsWrapper)
-import GHC (HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds, HsLocalBinds, HsLocalBindsLR (HsIPBinds), HsIPBinds (IPBinds), GhcTc)
+import GHC (HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds, HsLocalBinds, HsLocalBindsLR (HsIPBinds), HsIPBinds (IPBinds), GhcTc, LHsExpr, HsExpr (XExpr), XXExprGhcTc (WrapExpr), HsWrap (HsWrap))
 import Data.Generics (everywhereM, mkM)
 import Control.Monad.State (modify, State, runState, MonadState (put, get))
 import GHC.Data.Bag (filterBagM)
@@ -31,10 +31,11 @@ rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv,
 rewriteBinds binds cont = do
   updateEnv <- newTcRef emptyDNameEnv
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds
+  --outputFullTcM "Binds: " binds'
   printLnTcM "Finished rewriteBinds pass, checking for remaining placeholders"
   _ <- everywhereM (mkM checkDoneLHsBind) binds'
   _ <- everywhereM (mkM checkDoneHsLocalBinds) binds'
-  _ <- everywhereM (mkM (checkDoneHsWrapper "Unknown wrapper:")) binds'
+  _ <- everywhereM (mkM checkDoneLHsExpr) binds'
   _ <- everywhereM (mkM (checkDoneTcEvBinds "Unknown TcEvBinds:")) binds'
   top_ev_binds <- tcg_ev_binds <$> getGblEnv
   when (any (isPlaceholder . eb_rhs) top_ev_binds) $ failTcM $ text "Found placeholder in top-level ev binds: " <+> ppr top_ev_binds
@@ -247,8 +248,19 @@ checkDoneHsBind xb@(XHsBindsLR (AbsBinds{abs_ev_binds=ev_binds})) = forM_ ev_bin
 checkDoneHsBind fb@(FunBind {fun_ext=(wrap, _)}) = checkDoneHsWrapper "FunBind wrapper:" wrap >> return fb
 checkDoneHsBind b = return b
 
+checkDoneLHsExpr :: LHsExpr GhcTc -> TcM (LHsExpr GhcTc)
+checkDoneLHsExpr = wrapLocMA checkDoneHsExpr
+
+checkDoneHsExpr :: HsExpr GhcTc -> TcM (HsExpr GhcTc)
+checkDoneHsExpr expr@(XExpr (WrapExpr (HsWrap wrap _))) = checkDoneHsWrapper "Expression wrapper:" wrap >> return expr
+checkDoneHsExpr expr = return expr
+
 checkDoneHsWrapper :: String -> HsWrapper -> TcM HsWrapper
 checkDoneHsWrapper str (WpLet ev_binds) = WpLet <$> checkDoneTcEvBinds str ev_binds
+checkDoneHsWrapper str (WpCompose w1 w2) = do
+  w1' <- checkDoneHsWrapper str w1
+  w2' <- checkDoneHsWrapper str w2
+  return (WpCompose w1' w2')
 checkDoneHsWrapper _ w = return w
 
 checkDoneHsLocalBinds :: HsLocalBinds GhcTc -> TcM (HsLocalBinds GhcTc)

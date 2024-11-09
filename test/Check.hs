@@ -20,7 +20,7 @@ module Check where
 import Data.Kind
 import TotalClassPlugin
 
-assertCheckResult :: forall {ck} (c :: ck). CheckTotalityResult c => String -> Bool -> Bool -> Bool -> IO ()
+assertCheckResult :: forall c. CheckTotalityResult c => String -> Bool -> Bool -> Bool -> IO ()
 assertCheckResult str ex term ctxt = do
   putStrLn str
   case (isExhaustive @c, ex) of
@@ -157,5 +157,5 @@ testAll = do
   assertCheckResult @(forall a n. TestNonADT     a n) "TestNonADT"     True  True  True
   assertCheckResult @(forall a n. TestNonADTBad  a n) "TestNonADTBad"  False True  True
   assertCheckResult @(forall a n. TestCtxtBad    a n) "TestCtxtBad"    True  True  False
-  assertCheckResult @(forall a n. TestEscape   Int n) "TestEscape"    True  True  False
+  assertCheckResult @(forall   n. TestEscape   Int n) "TestEscape"     True  True  False
   --assertCheckResult @TestRepeatBad  "TestRepeatBad"    False True  True

@@ -10,7 +10,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 module Partial where
-import Data.Kind (Type, Constraint)
+import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import TotalClassPlugin
 
@@ -29,17 +29,10 @@ instance ListOfLength Bool Z where
 instance ListOfLength Bool n => ListOfLength Bool (S n) where
   mkList = False : mkList @Bool @n
 
---mkTotalConstraint [t| forall n. ListOfLength Bool n |]
---warnInfo ''ListOfLength
---
 class SingI (a :: k) where
 
 instance SingI (a :: Bool) where
 instance SingI (a :: MyNat) where
---
---warnInfo ''SingI
---
---mkTotalConstraint [t| forall (a :: Bool). SingI a |]
 
 instance TotalConstraint (ListOfLength Bool n) where
   _totalConstraintEvidence = checkTotality
@@ -47,8 +40,8 @@ instance TotalConstraint (ListOfLength Bool n) where
 instance TotalConstraint (SingI (a :: Bool)) where
   _totalConstraintEvidence = checkTotality
 
-foo :: forall (n :: MyNat). Proxy n -> [Bool]
+foo :: forall (n :: MyNat). ListOfLength Bool n => Proxy n -> [Bool]
 foo (_ :: Proxy n) = mkList @Bool @n
---
---foo2 :: [Bool]
---foo2 = foo (Proxy :: Proxy (S (S n)))
+
+foo2 :: [Bool]
+foo2 = foo (Proxy :: Proxy (S (S Z)))

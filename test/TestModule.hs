@@ -10,12 +10,11 @@
 {-# LANGUAGE RankNTypes #-}
 {-# OPTIONS_GHC -dcore-lint #-}
 module TestModule 
---    (testAll)
    (testExposedSimple, testExposedCall1, testExposedCall2, testAll)
 where
 
 import Data.Proxy
-import TotalClassPlugin ()
+import TotalClassPlugin (TotalConstraint (..), checkTotality)
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 testBaseline :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String 
@@ -142,6 +141,22 @@ testMonoCastCall1 (x :: Proxy s) = (testSimple :: KnownSymbol s => Proxy s -> St
 -- Cast the called function to its rewritten type with a known type param
 testMonoCastCall2 :: forall (s :: Symbol). Proxy s -> String
 testMonoCastCall2 (x :: Proxy s) = (testSimple :: KnownSymbol s => Proxy s -> String) x
+--
+-- Cast the called function to its old type
+--testPolyCastCall'1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+--testPolyCastCall'1 x = (testSimple :: forall (s' :: Symbol). Proxy s' -> String) x
+
+---- Cast the called function to its old type
+--testPolyCastCall'2 :: forall (s :: Symbol). Proxy s -> String
+--testPolyCastCall'2 x = (testSimple :: forall (s' :: Symbol). Proxy s' -> String) x
+--
+---- Cast the called function to its old type with a known type param
+--testMonoCastCall'1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+--testMonoCastCall'1 (x :: Proxy s) = (testSimple :: Proxy s -> String) x
+--
+---- Cast the called function to its old type with a known type param
+--testMonoCastCall'2 :: forall (s :: Symbol). Proxy s -> String
+--testMonoCastCall'2 (x :: Proxy s) = (testSimple :: Proxy s -> String) x
 
 testEtaSimple :: forall (s :: Symbol). Proxy s -> String
 testEtaSimple = symbolVal
@@ -260,26 +275,29 @@ testNestedEtaCall2 x = go x
   where
     go = testSimple
 
---data MyNat = Z | S MyNat
---
---class IsNat (n :: MyNat) where
---  toNat :: MyNat
---
---instance IsNat Z where
---  toNat = Z
---instance IsNat n => IsNat (S n) where
---  toNat = S (toNat @n)
---
---data Vec (n :: MyNat) a where
---  VNil :: Vec Z a
---  (:>) :: a -> Vec n a -> Vec (S n) a
---
---instance TotalClass IsNat where
---  totalityEvidence = checkTotality
---
---vlength :: Vec n a -> MyNat
---vlength (_ :: Vec n a) = toNat @n
---
+-- The example from the paper
+data MyNat = Z | S MyNat deriving Show
+
+class IsNat (n :: MyNat) where
+  toNat :: MyNat
+
+instance IsNat Z where
+  toNat = Z
+instance IsNat n => IsNat (S n) where
+  toNat = S (toNat @n)
+
+infixr 5 :>
+
+data Vec (n :: MyNat) a where
+  VNil :: Vec Z a
+  (:>) :: a -> Vec n a -> Vec (S n) a
+
+instance TotalConstraint (IsNat n) where
+  _totalConstraintEvidence = checkTotality
+
+vlength :: Vec n a -> MyNat
+vlength (_ :: Vec n a) = toNat @n
+
 testAll :: IO ()
 testAll = do
   putStrLn $ testBaseline (Proxy :: Proxy "testBaseline")
@@ -312,6 +330,10 @@ testAll = do
   putStrLn $ testPolyCastCall2 (Proxy :: Proxy "testPolyCastCall2")
   putStrLn $ testMonoCastCall1 (Proxy :: Proxy "testMonoCastCall1")
   putStrLn $ testMonoCastCall2 (Proxy :: Proxy "testMonoCastCall2")
+  --putStrLn $ testPolyCastCall'1 (Proxy :: Proxy "testPolyCastCall'1")
+  --putStrLn $ testPolyCastCall'2 (Proxy :: Proxy "testPolyCastCall'2")
+  --putStrLn $ testMonoCastCall'1 (Proxy :: Proxy "testMonoCastCall'1")
+  --putStrLn $ testMonoCastCall'2 (Proxy :: Proxy "testMonoCastCall'2")
   putStrLn $ testEtaSimple (Proxy :: Proxy "testEtaSimple")
   putStrLn $ testEtaCall1 (Proxy :: Proxy "testEtaCall1")
   putStrLn $ testEtaCall2 (Proxy :: Proxy "testEtaCall2")
@@ -341,4 +363,5 @@ testAll = do
   putStrLn $ testNestedEtaSimple (Proxy :: Proxy "testNestedEtaSimple")
   putStrLn $ testNestedEtaCall1 (Proxy :: Proxy "testNestedEtaCall1")
   putStrLn $ testNestedEtaCall2 (Proxy :: Proxy "testNestedEtaCall2")
+  putStrLn $ show $ vlength ((2 :: Int) :> 3 :> VNil)
   return ()

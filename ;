@@ -8,29 +8,32 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResult(..), assertTotality, TotalConstraint(..)) where
 
-import Data.Kind (Constraint, Type)
+import Data.Kind (Constraint)
+import qualified Data.Kind
 import GHC.TypeLits (KnownNat, KnownChar, KnownSymbol)
+import Language.Haskell.TH.Syntax
 
-type TotalityEvidence :: Constraint -> Type
 data TotalityEvidence c where UnsafeTotalityEvidence :: TotalityEvidence c deriving Show
 
-assertTotality :: TotalityEvidence c
+assertTotality :: TotalityEvidence (c :: ck)
 assertTotality = UnsafeTotalityEvidence
 
-type CheckTotalityResult :: Constraint -> Constraint
-class CheckTotalityResult c where
+type CheckTotalityResult :: forall {ck :: Data.Kind.Type}. ck -> Constraint
+class CheckTotalityResult (c :: ck) where
   isExhaustive :: Bool
   isTerminating :: Bool
   isContextOk :: Bool
 
-type CheckTotality :: Constraint -> Constraint
-class CheckTotality c where
+type CheckTotality :: forall {ck :: Data.Kind.Type}. ck -> Constraint
+class CheckTotality (c :: ck) where
   checkTotality :: TotalityEvidence c
 
 type TotalConstraint :: Constraint -> Constraint

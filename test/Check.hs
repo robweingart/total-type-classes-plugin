@@ -116,7 +116,7 @@ instance TotalConstraint (TestNonADT a n) where
  
 type Effect = (Type -> Type) -> (Type -> Type)
 
-class Append (xs :: [Effect]) (ys :: [Effect])
+class Append (xs :: [k]) (ys :: [k])
 instance Append '[] ys
 instance Append xs ys => Append (x ': xs) ys
 instance TotalConstraint (Append xs ys) where
@@ -140,8 +140,8 @@ instance TotalConstraint (TestPair a) where
 --instance TotalConstraint (TestPartial Bool n) where
 --  _totalConstraintEvidence = checkTotality
 
-class TestRepeatBad (x :: MyNat) (y :: MyNat)
-instance TestRepeatBad x x
+class TestRepeat(x :: MyNat) (y :: MyNat)
+instance TestRepeat x x
 
 --type SingI :: forall {k}. k -> Constraint
 --class SingI a where
@@ -158,4 +158,6 @@ testAll = do
   assertCheckResult @(forall a n. TestNonADTBad  a n) "TestNonADTBad"  False True  True
   assertCheckResult @(forall a n. TestCtxtBad    a n) "TestCtxtBad"    True  True  False
   assertCheckResult @(forall   n. TestEscape   Int n) "TestEscape"     True  True  False
-  --assertCheckResult @TestRepeatBad  "TestRepeatBad"    False True  True
+  assertCheckResult @(forall k (xs :: [k]) (ys :: [k]). Append xs ys) "Append" True True True
+  assertCheckResult @(forall x. TestRepeat x x)  "TestRepeatOk"    True True  True
+  assertCheckResult @(forall x y. TestRepeat x y)  "TestRepeatBad"    False True  True

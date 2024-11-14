@@ -25,7 +25,7 @@ import GHC.Core.InstEnv (ClsInst (..), lookupInstEnv, getPotentialUnifiers, inst
 import GHC.Tc.Utils.Env (tcGetInstEnvs, tcExtendIdEnv)
 import TotalClassPlugin.Checker.Errors (checkDsResult, TotalClassCheckerMessage (..), checkTcRnResult, checkPaterson, checkQuasiError)
 import TotalClassPlugin.GHCUtils (checkInstTermination, splitInstTyForValidity)
-import TotalClassPlugin.Rewriter.Utils (failTcM)
+import TotalClassPlugin.Rewriter.Utils (failTcM, outputTcM)
 import GHC.Tc.Utils.TcType (tyCoVarsOfTypesList)
 import GHC.Tc.Utils.Instantiate (tcInstSkolTyVars, instDFunType)
 import GHC.Tc.Types.Origin (unkSkol)
@@ -98,13 +98,16 @@ withThTypes types thing_inside = do
 
 check_evidence_fun :: Class -> [TH.Dec] -> TcM (Maybe TotalClassCheckerMessage)
 check_evidence_fun cls decs = do
-  binds <- checkTcRnResult $ TcM.tryTc $ do
+  tc_rn_result <- checkTcRnResult $ TcM.tryTc $ TcM.updTopFlags (flip wopt_unset Opt_WarnUnusedMatches) $ do
     ev_fun_binds <- case convertToHsDecls (Generated DoPmc) noSrcSpan decs of
       Left err -> TcM.failWithTc $ TcRnTHError (THSpliceFailed (RunSpliceFailure err))
       Right ev_fun_binds -> return ev_fun_binds
     (group, Nothing) <- findSplice ev_fun_binds
     (gbl_rn, rn_group) <- TcM.updGblEnv (\env -> env{tcg_binds=emptyBag}) $ rnTopSrcDecls group
+    -- outputTcM "evidence fun:" rn_group
     ((gbl_tc, _), _) <- captureTopConstraints $ TcM.setGblEnv gbl_rn $ tcTopSrcDecls rn_group
     (_, _, binds, _, _, _) <- TcM.setGblEnv gbl_tc $ zonkTopDecls emptyBag (tcg_binds gbl_tc) [] [] [] 
     return binds
-  checkDsResult cls $ TcM.updTopFlags (flip wopt_set Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds
+  case tc_rn_result of
+    Left err -> return $ Just err
+    Right binds -> checkDsResult cls $ TcM.updTopFlags (flip wopt_set Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds

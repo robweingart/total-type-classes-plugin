@@ -21,7 +21,7 @@ import GHC.Tc.Gen.Splice (runQuasi)
 data TotalClassCheckerMessage = TotalNonExhaustive !(HsMatchContext GhcTc) !ExhaustivityCheckType !MaxUncoveredPatterns [Id] [Nabla]
                               | TotalNonTerminating TcRnMessage
                               | TotalCheckerTHFailure String
-                              | TotalCheckerTHFatal THError
+                              | TotalCheckerTHFatal TcRnMessage
                               | TotalCheckerInvalidContext Type PredType
                               | TotalError
 
@@ -34,7 +34,7 @@ instance Diagnostic TotalClassCheckerMessage where
       mkSimpleDecorated (text "Termination check failed:") `unionDecoratedSDoc` diagnosticMessage defaultOpts tc_msg
     TotalCheckerTHFailure str ->
       mkSimpleDecorated (text "Exhaustiveness check failed:" $$ text str)
-    TotalCheckerTHFatal err -> mkSimpleDecorated (text "Unexpected fatal error during exhaustiveness check code gen:") `unionDecoratedSDoc` diagnosticMessage defaultOpts (TcRnTHError err)
+    TotalCheckerTHFatal tc_msg -> mkSimpleDecorated (text "Unexpected fatal error during exhaustiveness check code gen:") `unionDecoratedSDoc` diagnosticMessage defaultOpts tc_msg
     TotalCheckerInvalidContext tau pred_ty -> mkSimpleDecorated (text "Invalid constraint" <+> ppr pred_ty <+> text "in instance with head" <+> ppr tau)
     TotalError -> mkSimpleDecorated $ text "Unexpected error"
 
@@ -54,7 +54,9 @@ checkQuasiError thing_inside = do
       --outputTcM "TH errors: " msgs
       let (fatal, check_failure) = partitionBagWith get_th_msg $ mapMaybeBag get_th_error $ getMessages msgs
       case (headMaybe fatal, headMaybe check_failure) of
-        (Nothing, Nothing) -> failWithTotal TotalError
+        (Nothing, Nothing) ->  do
+          addMessages msgs
+          failWithTotal TotalError
         (Just e, _) -> failWithTotal e
         (Nothing, Just reason) -> return (Left reason)
   where
@@ -64,16 +66,27 @@ checkQuasiError thing_inside = do
       _ -> Nothing
 
     get_th_msg (ReportCustomQuasiError True str) = Right (TotalCheckerTHFailure str)
-    get_th_msg e = Left (TotalCheckerTHFatal e)
+    get_th_msg e = Left (TotalCheckerTHFatal (TcRnTHError e))
 
-checkTcRnResult :: TcRn (Maybe a, Messages TcRnMessage) -> TcRn a
+checkTcRnResult :: TcRn (Maybe a, Messages TcRnMessage) -> TcRn (Either TotalClassCheckerMessage a)
 checkTcRnResult thing_inside = do
   (result, msgs) <- thing_inside
   case result of
-    Just x -> return x
+    Just x -> return $ Right x
     Nothing -> do
-      addMessages msgs
-      failWithTotal TotalError
+      let (fatal, check_failure) = partitionBagWith classify_msg $ getMessages msgs
+      case (headMaybe fatal, headMaybe check_failure) of
+        (Nothing, Nothing) -> do
+          addMessages msgs
+          failWithTotal TotalError
+        (Just e, _) -> failWithTotal e
+        (Nothing, Just reason) -> return (Left reason)
+  where
+    conflict_err name = TotalCheckerTHFailure ("Variable corresponds to multiple parts of the instance head" ++ occNameString (rdrNameOcc name))
+    classify_msg (MsgEnvelope{errMsgDiagnostic=tc_msg}) = case tc_msg of
+      TcRnBindingNameConflict name _ -> Right (conflict_err name)
+      (TcRnMessageWithInfo _ (TcRnMessageDetailed _ (TcRnBindingNameConflict name _))) -> Right (conflict_err name)
+      e -> Left (TotalCheckerTHFatal e)
 
 checkDsResult :: Class -> TcM (Messages DsMessage, Maybe a) -> TcM (Maybe TotalClassCheckerMessage)
 checkDsResult cls thing_inside = do

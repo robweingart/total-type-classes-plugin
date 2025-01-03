@@ -26,6 +26,7 @@ import GHC.Core.Unify (matchBindFun, tcUnifyTys)
 import GHC.Hs.Syn.Type (hsWrapperType)
 import Control.Monad (unless, when)
 import Data.Traversable (mapAccumM)
+import GHC.Core.Predicate (Pred(..), classifyPredType)
 
 rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteBinds binds cont = do
@@ -188,9 +189,18 @@ rewriteWpLet newArgsRef (WpLet ev_binds) = do
   return $ WpLet ev_binds'
 rewriteWpLet _ w = return w
 
+show_var :: Pred -> Maybe Unique
+show_var (ClassPred _ [TyVarTy t]) = Just $ varUnique t
+show_var _ = Nothing
+
 rewriteTcEvBinds :: TcEvBinds -> TcM ([EvVar], TcEvBinds)
 rewriteTcEvBinds ebs@(TcEvBinds _) = failTcM $ text "Encountered unzonked TcEvBinds, this should not happen" <+> ppr ebs
-rewriteTcEvBinds (EvBinds binds) = let (binds', ev_vars) = runState (filterBagM isNotPlaceholder binds) [] in return (ev_vars, EvBinds binds')
+rewriteTcEvBinds (EvBinds binds) = do
+  let (binds', ev_vars) = runState (filterBagM isNotPlaceholder binds) []
+  case ev_vars of
+    [] -> return ()
+    _ -> outputTcM "New ev vars: " $ map (\v -> (v, varType v, show_var (classifyPredType (varType v)))) ev_vars
+  return (ev_vars, EvBinds binds')
 
 isNotPlaceholder :: EvBind -> State [EvVar] Bool
 isNotPlaceholder (EvBind {eb_lhs=evVar, eb_rhs=evTerm})

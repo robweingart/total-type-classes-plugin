@@ -9,6 +9,8 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
 {-# OPTIONS_GHC -dcore-lint #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
 module TestModule 
    (testExposedSimple, testExposedCall1, testExposedCall2, testAll)
 where
@@ -298,6 +300,22 @@ instance TotalConstraint (IsNat n) where
 vlength :: Vec n a -> MyNat
 vlength (_ :: Vec n a) = toNat @n
 
+class C (x :: MyNat) (y :: MyNat) where
+  showN :: String
+instance C Z y where
+  showN = ""
+instance C n y => C (S n) y where
+  showN = "." ++ showN @n @y
+
+instance TotalConstraint (C x y) where
+  _totalConstraintEvidence = checkTotality
+
+--f :: forall (m :: MyNat) (n :: MyNat). C m n => String
+--f =  showN @m @n ++ f @(S m) @(S n)
+
+--g :: forall (m :: MyNat) (n :: MyNat). C m n => String
+--g =  showN @m @n ++ f @(S m) @(S n) 
+
 testAll :: IO ()
 testAll = do
   putStrLn $ testBaseline (Proxy :: Proxy "testBaseline")
@@ -364,4 +382,5 @@ testAll = do
   putStrLn $ testNestedEtaCall1 (Proxy :: Proxy "testNestedEtaCall1")
   putStrLn $ testNestedEtaCall2 (Proxy :: Proxy "testNestedEtaCall2")
   putStrLn $ show $ vlength ((2 :: Int) :> 3 :> VNil)
+  --putStrLn $ f @(S Z) @(S (S Z))
   return ()

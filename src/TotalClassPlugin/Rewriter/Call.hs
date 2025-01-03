@@ -36,7 +36,7 @@ rewriteCalls ids binds cont
     printLnTcM "No new modified ids, ending loop"
     getEnvs
   | otherwise = do
-    --forM_ ids (outputTcM "")
+    -- forM_ ids (outputTcM "")
     (binds', lie) <- captureTopConstraints $ rewriteCallsIn ids binds
     (gbl, lcl) <- getEnvs
     new_ev_binds <- restoreEnvs (gbl, lcl) $ simplifyTop lie
@@ -229,6 +229,7 @@ mk_ev_apps subst update = do
   let unassigned_vars = filterVarSet (`notElemSubst` subst) vars
   unless (isEmptyVarSet unassigned_vars) $ failTcM $ text "the following vars from the called function's type have not been applied at this insertion point:" <+> ppr unassigned_vars 
   let theta = substTheta subst (new_theta update)
+  outputTcM "Emitting constraints: " theta
   instCallConstraints (OccurrenceOf $ varName $ new_id update) theta
 
 maybe_mk_new :: Subst -> Maybe (UpdateInfo, Subst) -> TcM (HsWrapper, Maybe (UpdateInfo,Subst))
@@ -236,6 +237,8 @@ maybe_mk_new _ Nothing = return (WpHole, Nothing)
 maybe_mk_new new_subst (Just (update, old_subst))
   | elemSubst (last_ty_var update) subst = do
     new_ev_apps <- mk_ev_apps subst update
+    outputTcM "Successfully applied " (update, subst)
+    printWrapper 1 new_ev_apps
     return (new_ev_apps, Nothing)
   | otherwise = return (WpHole, Just (update, subst))
   where

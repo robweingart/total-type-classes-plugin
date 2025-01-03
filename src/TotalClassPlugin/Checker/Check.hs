@@ -25,7 +25,7 @@ import GHC.Core.InstEnv (ClsInst (..), lookupInstEnv, getPotentialUnifiers, inst
 import GHC.Tc.Utils.Env (tcGetInstEnvs, tcExtendIdEnv)
 import TotalClassPlugin.Checker.Errors (checkDsResult, TotalClassCheckerMessage (..), checkTcRnResult, checkPaterson, checkQuasiError)
 import TotalClassPlugin.GHCUtils (checkInstTermination, splitInstTyForValidity)
-import TotalClassPlugin.Rewriter.Utils (failTcM, outputTcM)
+import TotalClassPlugin.Rewriter.Utils (failTcM)
 import GHC.Tc.Utils.TcType (tyCoVarsOfTypesList)
 import GHC.Tc.Utils.Instantiate (tcInstSkolTyVars, instDFunType)
 import GHC.Tc.Types.Origin (unkSkol)

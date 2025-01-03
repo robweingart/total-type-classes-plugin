@@ -18,7 +18,7 @@ import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf), SkolemInfoAnon (UnkSkol))
 import TotalClassPlugin.Rewriter.Env
 import TotalClassPlugin.Rewriter.Utils
 import GHC.Core.TyCo.Compare (eqType)
-import Control.Monad (unless, forM_, when)
+import Control.Monad (unless, when)
 import GHC.Core.TyCo.Subst (elemSubst)
 import GHC.Tc.Utils.Unify (checkConstraints)
 import GHC.Tc.Utils.Env (tcExtendNameTyVarEnv)

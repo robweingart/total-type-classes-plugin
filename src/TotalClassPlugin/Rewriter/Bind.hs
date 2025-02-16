@@ -197,9 +197,9 @@ rewriteTcEvBinds :: TcEvBinds -> TcM ([EvVar], TcEvBinds)
 rewriteTcEvBinds ebs@(TcEvBinds _) = failTcM $ text "Encountered unzonked TcEvBinds, this should not happen" <+> ppr ebs
 rewriteTcEvBinds (EvBinds binds) = do
   let (binds', ev_vars) = runState (filterBagM isNotPlaceholder binds) []
-  case ev_vars of
-    [] -> return ()
-    _ -> outputTcM "New ev vars: " $ map (\v -> (v, varType v, show_var (classifyPredType (varType v)))) ev_vars
+  -- case ev_vars of
+  --   [] -> return ()
+  --   _ -> outputTcM "New ev vars: " $ map (\v -> (v, varType v, show_var (classifyPredType (varType v)))) ev_vars
   return (ev_vars, EvBinds binds')
 
 isNotPlaceholder :: EvBind -> State [EvVar] Bool

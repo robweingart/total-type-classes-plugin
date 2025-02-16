@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module TotalClassPlugin.Rewriter.Utils (withTcRef, printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys, orElseM, mkMMaybe, orReturn) where
+module TotalClassPlugin.Rewriter.Utils (withTcRef, printLnTcM, outputTcM, outputFullTcM, failTcM, printWrapper, printBndrTys) where
 
 import Data.Foldable (forM_)
 
@@ -13,10 +13,8 @@ import GHC.Tc.Utils.Monad (failWith, newTcRef, readTcRef)
 import GHC.Tc.Errors.Types (TcRnMessage(TcRnUnknownMessage))
 import GHC.Utils.Error (mkPlainError)
 import GHC.Types.Error (mkSimpleUnknownDiagnostic)
-import Data.Data (Data, Typeable)
+import Data.Data (Data)
 import GHC.Data.Bag (Bag)
-import Data.Functor.Compose (Compose(Compose, getCompose))
-import Data.Generics (ext0)
 import GHC.Tc.Utils.TcType (evVarPred)
 
 withTcRef :: a -> (TcRef a -> TcM r) -> TcM (a, r)
@@ -119,21 +117,3 @@ printEvBinds n binds = do
       TyConApp _ [TyVarTy var] -> output' (n+3) "var: " $ varUnique var
       _ -> return ()
     output' (n+3) "RHS: " rhs
-
-
-newtype M' m x = M' { unM' :: x -> m x }
-
-extM' :: (Typeable a, Typeable b) => (a -> m a) -> (b -> m b) -> a -> m a
-extM' def ext = unM' ((M' def) `ext0` (M' ext))
-
-orElseM :: Monad m => m (Maybe a) -> m a -> m a
-orElseM f g = f >>= \case
-  Just x' -> return x'
-  Nothing -> g
-
-
-mkMMaybe :: (Monad m, Typeable a, Typeable b) => (b -> m (Maybe b)) -> a -> m (Maybe a)
-mkMMaybe f = getCompose . extM' (\_ -> Compose (return Nothing)) (Compose . f)
-
-orReturn :: Monad m => (a -> m (Maybe a)) -> a -> m a
-orReturn f x = orElseM (f x) (return x)

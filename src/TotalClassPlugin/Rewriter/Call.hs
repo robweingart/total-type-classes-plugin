@@ -74,16 +74,6 @@ reskolemise tvs given thing_inside = do
     thing_inside
   return (new_ev_binds, result)
 
-reskolemiseWrapper :: HsWrapper -> TcM result -> TcM (HsWrapper, result)
-reskolemiseWrapper WpHole thing_inside = do
-  result <- thing_inside
-  return (WpHole, result)
-reskolemiseWrapper wrap thing_inside = do
-  (tvs, given) <- wrapperLams wrap
-  (new_ev_binds, result) <- reskolemise tvs given thing_inside
-  new_wrap <- addToWpLet new_ev_binds wrap
-  return (new_wrap, result)
-
 addToWpLet :: TcEvBinds -> HsWrapper -> TcM HsWrapper 
 addToWpLet new_ev_binds wrap = do
   withTcRef (0 :: Int) (go wrap) >>= \case
@@ -107,16 +97,16 @@ addToTcEvBinds (EvBinds binds) new_ev_binds = case new_ev_binds of
   TcEvBinds (CoEvBindsVar{}) -> failTcM $ text "Added CoEvBindsVar to existing WpLet"
   EvBinds new_binds -> return $ EvBinds (new_binds `unionBags` binds)
 
-wrapperLams :: HsWrapper -> TcM ([TyVar], [EvVar])
+wrapperLams :: HsWrapper -> ([TyVar], [EvVar])
 wrapperLams w = go w ([], [])
   where
-    go :: HsWrapper -> ([TyVar], [EvVar]) -> TcM ([TyVar], [EvVar])
-    go WpHole vs = return vs
-    go (WpCompose w1 w2) vs = go w2 vs >>= go w1
+    go :: HsWrapper -> ([TyVar], [EvVar]) -> ([TyVar], [EvVar])
+    go WpHole vs = vs
+    go (WpCompose w1 w2) vs = go w1 $ go w2 vs 
     go (WpFun _ w2 _) vs = go w2 vs
-    go (WpTyLam tv) (tvs, evs) = return (tv : tvs, evs)
-    go (WpEvLam ev) (tvs, evs) = return (tvs, ev : evs)
-    go _ vs = return vs
+    go (WpTyLam tv) (tvs, evs) = (tv : tvs, evs)
+    go (WpEvLam ev) (tvs, evs) = (tvs, ev : evs)
+    go _ vs = vs
 
 rewriteCallsIn :: UpdateEnv -> GenericM TcM
 rewriteCallsIn ids = gmapM (rewriteCallsIn ids)
@@ -124,16 +114,35 @@ rewriteCallsIn ids = gmapM (rewriteCallsIn ids)
                      `extM` (wrapLocMA (rewriteHsBind (rewriteCallsIn ids)) :: LHsBind GhcTc -> TcM (LHsBind GhcTc))
 
 rewriteHsBind :: GenericM TcM -> HsBind GhcTc -> TcM (HsBind GhcTc)
-rewriteHsBind inside b@(FunBind {fun_matches=matches, fun_ext=(wrap, ctick)}) = do
-  (wrap', matches') <- reskolemiseWrapper wrap $ inside matches
-  return $ b{fun_matches=matches', fun_ext=(wrap', ctick)}
-rewriteHsBind inside (XHsBindsLR (AbsBinds { abs_tvs=tvs
+rewriteHsBind inside b = do
+  (maybe_ev_binds, b') <- reskolemiseBind b $ gmapM inside b
+  case maybe_ev_binds of
+    Nothing -> return b'
+    Just ev_binds -> insertTcEvBinds ev_binds b'
+
+reskolemiseBind :: HsBind GhcTc -> TcM result -> TcM (Maybe TcEvBinds, result)
+reskolemiseBind (FunBind {fun_ext=(wrap, _)}) thing_inside = do
+  let (tvs, evs) = wrapperLams wrap
+  (binds, result) <- reskolemise tvs evs $ thing_inside
+  return (Just binds, result)
+reskolemiseBind (XHsBindsLR (AbsBinds { abs_tvs=tvs, abs_ev_vars=evs })) thing_inside = do
+  (binds, result) <- reskolemise tvs evs $ thing_inside
+  return (Just binds, result)
+reskolemiseBind _ thing_inside = do
+  result <- thing_inside
+  return (Nothing, result)
+
+
+insertTcEvBinds :: TcEvBinds -> HsBind GhcTc -> TcM (HsBind GhcTc)
+insertTcEvBinds new_ev_binds b@(FunBind {fun_ext=(wrap, ctick)}) = do
+  wrap' <- addToWpLet new_ev_binds wrap
+  return $ b{fun_ext=(wrap', ctick)}
+insertTcEvBinds new_ev_binds (XHsBindsLR (AbsBinds { abs_tvs=tvs
                                           , abs_ev_vars=ev_vars
                                           , abs_exports=exports
                                           , abs_ev_binds=ev_binds
                                           , abs_binds=binds
                                           , abs_sig=sig })) = do
-  (new_ev_binds, binds') <- reskolemise tvs ev_vars $ inside binds
   ev_binds' <- case ev_binds of
     [] -> return [new_ev_binds]
     [old_ev_binds] -> do
@@ -147,10 +156,9 @@ rewriteHsBind inside (XHsBindsLR (AbsBinds { abs_tvs=tvs
                                        , abs_ev_vars=ev_vars
                                        , abs_exports=exports
                                        , abs_ev_binds=ev_binds'
-                                       , abs_binds=binds'
+                                       , abs_binds=binds
                                        , abs_sig=sig })
-  
-rewriteHsBind inside b = gmapM inside b
+insertTcEvBinds _ b = failTcM $ text "Can't add TcEvBinds to this kind of HsBind: " <+> ppr b
 
 
 rewriteWrapExpr :: UpdateEnv -> GenericM TcM -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
@@ -173,11 +181,13 @@ rewriteWrapExpr updates inside outer = do
 
     go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe (UpdateInfo, Subst))
     go expr@(XExpr (WrapExpr (HsWrap wrap old_inner))) = do 
-      (wrap', (new_ev_apps, new_inner, maybe_update)) <- reskolemiseWrapper wrap $ do 
+      let (tvs, evs) = wrapperLams wrap
+      (ev_binds, (new_ev_apps, new_inner, maybe_update)) <- reskolemise tvs evs $ do 
         (new_inner, maybe_update) <- go old_inner
         let subst = snd $ hsWrapperTypeSubst wrap (hsExprType old_inner)
         (new_ev_apps, maybe_update') <- maybe_mk_new subst maybe_update
         return (new_ev_apps, new_inner, maybe_update')
+      wrap' <- addToWpLet ev_binds wrap
       new_wrap <- maybe_add_to_first_ty_app wrap' new_ev_apps
       let new_expr = XExpr (WrapExpr (HsWrap new_wrap new_inner))
       unless (isJust maybe_update || hsExprType expr `eqType` hsExprType new_expr) $

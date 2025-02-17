@@ -11,7 +11,7 @@ import GHC.Tc.Types (TcM, TcGblEnv (..), TcLclEnv)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (eb_rhs), TcEvBinds (TcEvBinds, EvBinds), evBindMapBinds, EvBindsVar (ebv_binds, EvBindsVar, CoEvBindsVar), mkWpLet, extendEvBinds, emptyTcEvBinds)
 import Data.Generics (mkQ, GenericM, Data (gmapM), everything, extM)
 import GHC.Hs.Syn.Type (hsExprType)
-import GHC.Tc.Utils.Monad (readTcRef, updTcRef, wrapLocMA, getEnvs, restoreEnvs, setGblEnv, addTopEvBinds, setSrcSpanA)
+import GHC.Tc.Utils.Monad (readTcRef, updTcRef, wrapLocMA, getEnvs, restoreEnvs, setGblEnv, addTopEvBinds, setSrcSpanA, wrapLocFstMA)
 import GHC.Tc.Utils.Instantiate (instCallConstraints)
 import GHC.Tc.Types.Origin (CtOrigin(OccurrenceOf), SkolemInfoAnon (UnkSkol))
 
@@ -182,34 +182,40 @@ rewriteWrapExpr updates inside outer = do
     go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe (UpdateInfo, Subst))
     go expr@(XExpr (WrapExpr (HsWrap wrap old_inner))) = do 
       let (tvs, evs) = wrapperLams wrap
-      (ev_binds, (new_ev_apps, new_inner, maybe_update)) <- reskolemise tvs evs $ do 
+      (ev_binds, (new_inner, update_result)) <- reskolemise tvs evs $ do 
         (new_inner, maybe_update) <- go old_inner
         let subst = snd $ hsWrapperTypeSubst wrap (hsExprType old_inner)
-        (new_ev_apps, maybe_update') <- maybe_mk_new subst maybe_update
-        return (new_ev_apps, new_inner, maybe_update')
-      wrap' <- addToWpLet ev_binds wrap
-      new_wrap <- maybe_add_to_first_ty_app wrap' new_ev_apps
+        update_result <- mk_ev_apps_for_update subst maybe_update
+        return (new_inner, update_result)
+      wrap_with_ev_binds <- addToWpLet ev_binds wrap
+      (new_wrap, remaining_update) <- case update_result of
+        Left remaining_update -> return (wrap_with_ev_binds, Just remaining_update)
+        Right new_ev_apps -> do
+          updated_wrap <- maybe_add_to_first_ty_app wrap_with_ev_binds new_ev_apps
+          return (updated_wrap, Nothing)
       let new_expr = XExpr (WrapExpr (HsWrap new_wrap new_inner))
-      unless (isJust maybe_update || hsExprType expr `eqType` hsExprType new_expr) $
+      unless (isJust remaining_update || hsExprType expr `eqType` hsExprType new_expr) $
         failTcM $ text "Type still different after update:" <+> (vcat $
           [ text "old:" <+> ppr (hsExprType expr)
           , text "new:" <+> ppr (hsExprType new_expr)
           ])
-      return (new_expr, maybe_update)
-    go (HsAppType ty (L loc old_inner) tok wc_type) = setSrcSpanA loc $ do
-      (new_inner, maybe_update) <- go old_inner
-      let subst = snd $ piResultTysSubst (hsExprType old_inner) [ty]
-      (new_ev_apps, maybe_update') <- maybe_mk_new subst maybe_update
-      return (mkHsWrap new_ev_apps $ HsAppType ty (L loc new_inner) tok wc_type, maybe_update')
-    go (HsPar x l_tok (L loc old_inner) r_tok) = setSrcSpanA loc $ do
-      (new_inner, maybe_update) <- go old_inner
-      return (HsPar x l_tok (L loc new_inner) r_tok, maybe_update)
+      return (new_expr, remaining_update)
+    go (HsAppType ty old_inner tok wc_type) = do
+      (new_inner, maybe_update) <- wrapLocFstMA go old_inner
+      let subst = snd $ piResultTysSubst (hsExprType (unLoc old_inner)) [ty]
+      let new_expr = HsAppType ty new_inner tok wc_type
+      mk_ev_apps_for_update subst maybe_update >>= \case
+        Left remaining_update -> return (new_expr, Just remaining_update)
+        Right new_ev_apps -> return (mkHsWrap new_ev_apps new_expr, Nothing)
+    go (HsPar x l_tok old_inner r_tok) =do
+      (new_inner, maybe_update) <- wrapLocFstMA go old_inner
+      return (HsPar x l_tok new_inner r_tok, maybe_update)
     go (HsVar x (L l var))
-      | Just update <- lookupDNameEnv updates $ varName var = setSrcSpanA l $ do
+      | Just update <- lookupDNameEnv updates $ varName var = do
         return ((HsVar x (L l (new_id update))), Just (update, emptySubst))
-    go (HsApp x (L l f) arg) = setSrcSpanA l $ do
-      (new_f, maybe_update) <- go f
-      return (HsApp x (L l new_f) arg, maybe_update)
+    go (HsApp x f arg) = do
+      (new_f, maybe_update) <- wrapLocFstMA go f
+      return (HsApp x new_f arg, maybe_update)
     go expr = do
       expr' <- inside expr
       unless (hsExprType expr `eqType` hsExprType expr') $
@@ -225,15 +231,15 @@ mk_ev_apps subst update = do
   -- outputTcM "Emitting constraints: " theta
   instCallConstraints (OccurrenceOf $ varName $ new_id update) theta
 
-maybe_mk_new :: Subst -> Maybe (UpdateInfo, Subst) -> TcM (HsWrapper, Maybe (UpdateInfo,Subst))
-maybe_mk_new _ Nothing = return (WpHole, Nothing)
-maybe_mk_new new_subst (Just (update, old_subst))
+mk_ev_apps_for_update :: Subst -> Maybe (UpdateInfo, Subst) -> TcM (Either (UpdateInfo, Subst) HsWrapper)
+mk_ev_apps_for_update _ Nothing = return $ Right WpHole
+mk_ev_apps_for_update new_subst (Just (update, old_subst))
   | elemSubst (last_ty_var update) subst = do
     new_ev_apps <- mk_ev_apps subst update
     -- outputTcM "Successfully applied " (update, subst)
     -- printWrapper 1 new_ev_apps
-    return (new_ev_apps, Nothing)
-  | otherwise = return (WpHole, Just (update, subst))
+    return $ Right new_ev_apps
+  | otherwise = return $ Left (update, subst)
   where
     subst = unionSubst new_subst old_subst
 

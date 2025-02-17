@@ -69,6 +69,7 @@ library
         TotalClassPlugin.Rewriter.Solve,
         TotalClassPlugin.Rewriter.Bind,
         TotalClassPlugin.Rewriter.Call,
+        TotalClassPlugin.Rewriter.Capture,
         TotalClassPlugin.Rewriter.Utils,
         TotalClassPlugin.Rewriter.Validate,
         TotalClassPlugin.Rewriter.Env,

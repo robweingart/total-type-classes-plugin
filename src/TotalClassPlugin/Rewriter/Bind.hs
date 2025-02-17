@@ -3,12 +3,12 @@
 
 module TotalClassPlugin.Rewriter.Bind (rewriteBinds) where
 
-import Data.Foldable (forM_, Foldable (toList))
+import Data.Foldable (Foldable (toList))
 
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef, TcLclEnv)
 import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), isIdHsWrapper)
-import GHC (HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds, HsLocalBinds, HsLocalBindsLR (HsIPBinds), HsIPBinds (IPBinds), GhcTc, LHsExpr, HsExpr (XExpr), XXExprGhcTc (WrapExpr), HsWrap (HsWrap))
+import GHC (HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds, GhcTc)
 import Data.Generics (everywhereM, mkM)
 import Control.Monad.State (modify, State, runState, MonadState (put, get))
 import GHC.Data.Bag (filterBagM)
@@ -26,7 +26,7 @@ import GHC.Core.Unify (matchBindFun, tcUnifyTys)
 import GHC.Hs.Syn.Type (hsWrapperType)
 import Control.Monad (unless, when)
 import Data.Traversable (mapAccumM)
-import GHC.Core.Predicate (Pred(..), classifyPredType)
+import TotalClassPlugin.Rewriter.Validate (checkNoPlaceholders)
 
 rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteBinds binds cont = do
@@ -34,10 +34,7 @@ rewriteBinds binds cont = do
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds
   --outputFullTcM "Binds: " binds'
   printLnTcM "Finished rewriteBinds pass, checking for remaining placeholders"
-  _ <- everywhereM (mkM checkDoneLHsBind) binds'
-  _ <- everywhereM (mkM checkDoneHsLocalBinds) binds'
-  _ <- everywhereM (mkM checkDoneLHsExpr) binds'
-  _ <- everywhereM (mkM (checkDoneTcEvBinds "Unknown TcEvBinds:")) binds'
+  checkNoPlaceholders binds'
   top_ev_binds <- tcg_ev_binds <$> getGblEnv
   when (any (isPlaceholder . eb_rhs) top_ev_binds) $ failTcM $ text "Found placeholder in top-level ev binds: " <+> ppr top_ev_binds
   updates <- readTcRef updateEnv
@@ -189,17 +186,10 @@ rewriteWpLet newArgsRef (WpLet ev_binds) = do
   return $ WpLet ev_binds'
 rewriteWpLet _ w = return w
 
-show_var :: Pred -> Maybe Unique
-show_var (ClassPred _ [TyVarTy t]) = Just $ varUnique t
-show_var _ = Nothing
-
 rewriteTcEvBinds :: TcEvBinds -> TcM ([EvVar], TcEvBinds)
 rewriteTcEvBinds ebs@(TcEvBinds _) = failTcM $ text "Encountered unzonked TcEvBinds, this should not happen" <+> ppr ebs
 rewriteTcEvBinds (EvBinds binds) = do
   let (binds', ev_vars) = runState (filterBagM isNotPlaceholder binds) []
-  -- case ev_vars of
-  --   [] -> return ()
-  --   _ -> outputTcM "New ev vars: " $ map (\v -> (v, varType v, show_var (classifyPredType (varType v)))) ev_vars
   return (ev_vars, EvBinds binds')
 
 isNotPlaceholder :: EvBind -> State [EvVar] Bool
@@ -248,37 +238,3 @@ rewriteLastTyLamAfter ev_vars target_tv w = case go w Nothing of
     go w' (Just tv) = Right (tv, rewrite w')
 
     rewrite w' = foldr ((<.>) . WpEvLam) w' ev_vars
-
---(Just tv, WpTyLam tv <.> foldr ((<.>) . WpEvLam) WpHole ev_vars)
-checkDoneLHsBind :: LHsBind GhcTc -> TcM (LHsBind GhcTc)
-checkDoneLHsBind = wrapLocMA checkDoneHsBind
-
-checkDoneHsBind :: HsBind GhcTc -> TcM (HsBind GhcTc)
-checkDoneHsBind xb@(XHsBindsLR (AbsBinds{abs_ev_binds=ev_binds})) = forM_ ev_binds (checkDoneTcEvBinds "AbsBinds:") >> return xb
-checkDoneHsBind fb@(FunBind {fun_ext=(wrap, _)}) = checkDoneHsWrapper "FunBind wrapper:" wrap >> return fb
-checkDoneHsBind b = return b
-
-checkDoneLHsExpr :: LHsExpr GhcTc -> TcM (LHsExpr GhcTc)
-checkDoneLHsExpr = wrapLocMA checkDoneHsExpr
-
-checkDoneHsExpr :: HsExpr GhcTc -> TcM (HsExpr GhcTc)
-checkDoneHsExpr expr@(XExpr (WrapExpr (HsWrap wrap _))) = checkDoneHsWrapper "Expression wrapper:" wrap >> return expr
-checkDoneHsExpr expr = return expr
-
-checkDoneHsWrapper :: String -> HsWrapper -> TcM HsWrapper
-checkDoneHsWrapper str (WpLet ev_binds) = WpLet <$> checkDoneTcEvBinds str ev_binds
-checkDoneHsWrapper str (WpCompose w1 w2) = do
-  w1' <- checkDoneHsWrapper str w1
-  w2' <- checkDoneHsWrapper str w2
-  return (WpCompose w1' w2')
-checkDoneHsWrapper _ w = return w
-
-checkDoneHsLocalBinds :: HsLocalBinds GhcTc -> TcM (HsLocalBinds GhcTc)
-checkDoneHsLocalBinds lbs@(HsIPBinds _ (IPBinds ev_binds _)) = checkDoneTcEvBinds "HsIPBinds" ev_binds >> return lbs
-checkDoneHsLocalBinds lbs = return lbs
-
-checkDoneTcEvBinds :: String -> TcEvBinds -> TcM TcEvBinds
-checkDoneTcEvBinds str (EvBinds binds)
-  | any (isPlaceholder . eb_rhs) binds = failTcM $ text str <+> text "Found placeholder after rewrites: " <+> ppr binds
-checkDoneTcEvBinds str (TcEvBinds _) = failTcM $ text str <+> text "Encountered unzonked TcEvBinds, this should not happen"
-checkDoneTcEvBinds _ ev_binds = return ev_binds

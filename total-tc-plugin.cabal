@@ -70,6 +70,7 @@ library
         TotalClassPlugin.Rewriter.Bind,
         TotalClassPlugin.Rewriter.Call,
         TotalClassPlugin.Rewriter.Utils,
+        TotalClassPlugin.Rewriter.Validate,
         TotalClassPlugin.Rewriter.Env,
         TotalClassPlugin.Checker.Solve,
         TotalClassPlugin.Checker.TH,

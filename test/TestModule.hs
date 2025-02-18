@@ -145,20 +145,20 @@ testMonoCastCall2 :: forall (s :: Symbol). Proxy s -> String
 testMonoCastCall2 (x :: Proxy s) = (testSimple :: KnownSymbol s => Proxy s -> String) x
 --
 -- Cast the called function to its old type
---testPolyCastCall'1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
---testPolyCastCall'1 x = (testSimple :: forall (s' :: Symbol). Proxy s' -> String) x
+testPolyCastCall'1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testPolyCastCall'1 x = (testSimple :: forall (s' :: Symbol). Proxy s' -> String) x
 
 ---- Cast the called function to its old type
---testPolyCastCall'2 :: forall (s :: Symbol). Proxy s -> String
---testPolyCastCall'2 x = (testSimple :: forall (s' :: Symbol). Proxy s' -> String) x
+testPolyCastCall'2 :: forall (s :: Symbol). Proxy s -> String
+testPolyCastCall'2 x = (testSimple :: forall (s' :: Symbol). Proxy s' -> String) x
 --
 ---- Cast the called function to its old type with a known type param
---testMonoCastCall'1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
---testMonoCastCall'1 (x :: Proxy s) = (testSimple :: Proxy s -> String) x
+testMonoCastCall'1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testMonoCastCall'1 (x :: Proxy s) = (testSimple :: Proxy s -> String) x
 --
 ---- Cast the called function to its old type with a known type param
---testMonoCastCall'2 :: forall (s :: Symbol). Proxy s -> String
---testMonoCastCall'2 (x :: Proxy s) = (testSimple :: Proxy s -> String) x
+testMonoCastCall'2 :: forall (s :: Symbol). Proxy s -> String
+testMonoCastCall'2 (x :: Proxy s) = (testSimple :: Proxy s -> String) x
 
 testEtaSimple :: forall (s :: Symbol). Proxy s -> String
 testEtaSimple = symbolVal
@@ -348,10 +348,10 @@ testAll = do
   putStrLn $ testPolyCastCall2 (Proxy :: Proxy "testPolyCastCall2")
   putStrLn $ testMonoCastCall1 (Proxy :: Proxy "testMonoCastCall1")
   putStrLn $ testMonoCastCall2 (Proxy :: Proxy "testMonoCastCall2")
-  --putStrLn $ testPolyCastCall'1 (Proxy :: Proxy "testPolyCastCall'1")
-  --putStrLn $ testPolyCastCall'2 (Proxy :: Proxy "testPolyCastCall'2")
-  --putStrLn $ testMonoCastCall'1 (Proxy :: Proxy "testMonoCastCall'1")
-  --putStrLn $ testMonoCastCall'2 (Proxy :: Proxy "testMonoCastCall'2")
+  putStrLn $ testPolyCastCall'1 (Proxy :: Proxy "testPolyCastCall'1")
+  putStrLn $ testPolyCastCall'2 (Proxy :: Proxy "testPolyCastCall'2")
+  putStrLn $ testMonoCastCall'1 (Proxy :: Proxy "testMonoCastCall'1")
+  putStrLn $ testMonoCastCall'2 (Proxy :: Proxy "testMonoCastCall'2")
   putStrLn $ testEtaSimple (Proxy :: Proxy "testEtaSimple")
   putStrLn $ testEtaCall1 (Proxy :: Proxy "testEtaCall1")
   putStrLn $ testEtaCall2 (Proxy :: Proxy "testEtaCall2")

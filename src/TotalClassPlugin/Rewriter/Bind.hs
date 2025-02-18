@@ -1,13 +1,14 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 
-module TotalClassPlugin.Rewriter.Bind (rewriteBinds) where
+module TotalClassPlugin.Rewriter.Bind (rewriteBinds, removePlaceholdersFromWrapper) where
 
+import Data.Foldable (Foldable (toList))
 
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM, TcGblEnv (..), TcRef, TcLclEnv)
-import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), isIdHsWrapper)
-import GHC (HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds, GhcTc)
+import GHC.Tc.Types.Evidence (HsWrapper (..), (<.>), EvBind (EvBind, eb_lhs, eb_rhs), TcEvBinds (TcEvBinds, EvBinds), isIdHsWrapper, EvBindsVar (EvBindsVar, ebv_binds, CoEvBindsVar), evBindMapBinds)
+import GHC (HsBindLR (..), AbsBinds (..), ABExport (abe_mono, abe_poly, ABE, abe_wrap), TyThing (AnId), MatchGroupTc (MatchGroupTc), MatchGroup (mg_ext, MG), LHsBind, HsBind, LHsBinds, GhcTc)
 import Data.Generics (everywhereM, mkM)
 import Control.Monad.State (modify, State, runState, MonadState (put, get))
 import GHC.Data.Bag (filterBagM)
@@ -15,6 +16,7 @@ import TotalClassPlugin.Rewriter.Placeholder (isPlaceholder)
 import GHC.Tc.Utils.TcType (mkTyCoVarTys, substTy, mkPhiTy, evVarPred)
 import Data.Maybe (mapMaybe, listToMaybe)
 import GHC.Tc.Utils.Monad (newTcRef, readTcRef, updTcRef, wrapLocMA, updGblEnv, getGblEnv)
+import GHC.Tc.Utils.Env (tcExtendGlobalEnvImplicit)
 import GHC.Types.Unique.DFM (plusUDFM)
 import GHC.Core.TyCo.Rep (Type (..))
 
@@ -24,19 +26,16 @@ import GHC.Core.Unify (matchBindFun, tcUnifyTys)
 import GHC.Hs.Syn.Type (hsWrapperType)
 import Control.Monad (unless, when)
 import Data.Traversable (mapAccumM)
-import TotalClassPlugin.Rewriter.Validate (checkNoPlaceholders)
 
 rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteBinds binds cont = do
   updateEnv <- newTcRef emptyDNameEnv
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds
   --outputFullTcM "Binds: " binds'
-  printLnTcM "Finished rewriteBinds pass, checking for remaining placeholders"
-  checkNoPlaceholders binds'
   top_ev_binds <- tcg_ev_binds <$> getGblEnv
   when (any (isPlaceholder . eb_rhs) top_ev_binds) $ failTcM $ text "Found placeholder in top-level ev binds: " <+> ppr top_ev_binds
   updates <- readTcRef updateEnv
-  updGblEnv (\gbl -> gbl{tcg_binds=binds'}) $ extendGlobalEnvWithUpdates updates $ do
+  updGblEnv (\gbl -> gbl{tcg_binds=binds'}) $ tcExtendGlobalEnvImplicit (map (AnId . new_id) $ toList updates) $ do
     cont updates binds'
 
 rewriteLHsBind :: TcRef UpdateEnv -> LHsBind GhcTc -> TcM (LHsBind GhcTc)
@@ -71,14 +70,13 @@ rewriteXHsBindsLR _ b = return b
 
 rewriteABExport :: TcRef UpdateEnv -> [TyVar] -> [EvVar] -> [EvVar] -> ABExport -> TcM ABExport
 rewriteABExport updateEnv tvs old_ev_vars added_ev_vars e@ABE{abe_mono=mono, abe_poly=poly, abe_wrap=wrap} = do
-  (new_mono_type, update_from_mono) <- do_mono_update
-  let new_mono = setIdType mono new_mono_type
+  (new_mono, update_from_mono) <- do_mono_update
   let binders = mkTyVarBinders InferredSpec tvs
   let theta = map evVarPred (added_ev_vars ++ old_ev_vars)
-  let new_poly = setIdType poly $
+  let new_poly = setVarType poly $
                  mkInvisForAllTys binders $
                  mkPhiTy theta $
-                 new_mono_type
+                 idType new_mono
   update_from_abs <- if
     | null added_ev_vars -> return Nothing 
     | Just last_tv <- listToMaybe (reverse tvs) -> return $ Just (map evVarPred added_ev_vars, last_tv)
@@ -90,20 +88,20 @@ rewriteABExport updateEnv tvs old_ev_vars added_ev_vars e@ABE{abe_mono=mono, abe
     (Just _, Just _) -> failTcM $ text "Both inner binds and abs_ev_binds were updated"
   return e{abe_mono=new_mono,abe_poly=new_poly}
   where
-    do_mono_update :: TcM (Type, Maybe (ThetaType, TyVar))
+    do_mono_update :: TcM (Id, Maybe (ThetaType, TyVar))
     do_mono_update = do
       updates <- readTcRef updateEnv
-      case lookupDNameEnv updates (idName mono) of
-        Nothing -> return (idType mono, Nothing)
+      case lookupDNameEnv updates (varName mono) of
+        Nothing -> return (mono, Nothing)
         Just u -> do
           updTcRef updateEnv (\env -> delFromDNameEnv env (varName mono))
-          return (updateInfoNewType u, Just (updateInfoNewTheta u, updateInfoLastTyVar u))
+          return (new_id u, Just (new_theta u, last_ty_var u))
     do_poly_update new_poly theta_for_update last_tv = do
       unless (isIdHsWrapper wrap) $ failTcM $ text "Rewrite inside AbsBinds with non-identity abe_wrap"
-      let update = IdUpdate { old_type=idType poly
-                            , new_id=new_poly
-                            , new_theta=theta_for_update
-                            , last_ty_var=last_tv }
+      let update = UInfo { old_type=idType poly
+                         , new_id=new_poly
+                         , new_theta=theta_for_update
+                         , last_ty_var=last_tv }
       updTcRef updateEnv (\env -> extendDNameEnv env (varName new_poly) update)
       
                  
@@ -116,7 +114,7 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
   let old_vars = mapMaybe namedBinderVar $ fst $ splitPiTys old_ty
   let w_vars = mapMaybe namedBinderVar $ fst $ splitPiTys wrapped
   let maybe_subst = tcUnifyTys (matchBindFun (mkVarSet w_vars)) (mkTyCoVarTys w_vars) (mkTyCoVarTys old_vars)
-  wrapper_res <- rewriteHsWrapper wrapper
+  wrapper_res <- removePlaceholdersFromWrapper wrapper
   case (wrapper_res, maybe_subst) of
     (Nothing, _) -> return b
     (_, Nothing) -> failTcM $ text "Failed to unify fun type"
@@ -128,7 +126,7 @@ rewriteFunBind updateEnv b@(FunBind {fun_id=(L loc fid), fun_ext=(wrapper, ctick
       let rewrapped = substTy subst $ hsWrapperType wrapper' $ mkScaledFunTys args res
       new_ty <- copy_flags old_ty rewrapped
       let fid' = setVarType fid new_ty
-      let uinfo = IdUpdate{old_type=old_ty,new_id=fid',new_theta=theta',last_ty_var=last_tv'}
+      let uinfo = UInfo{new_id=fid',old_type=old_ty,new_theta=theta',last_ty_var=last_tv'}
       updTcRef updateEnv (\env -> extendDNameEnv env (varName fid') uinfo)
       return b {fun_id=L loc fid', fun_ext=(wrapper', ctick)}
   where
@@ -163,8 +161,8 @@ namedBinderVar :: PiTyBinder -> Maybe TyCoVar
 namedBinderVar (Named (Bndr var _)) = Just var
 namedBinderVar _ = Nothing
 
-rewriteHsWrapper :: HsWrapper -> TcM (Maybe (HsWrapper, [PredType], TyVar))
-rewriteHsWrapper wrapper = do
+removePlaceholdersFromWrapper :: HsWrapper -> TcM (Maybe (HsWrapper, [PredType], TyVar))
+removePlaceholdersFromWrapper wrapper = do
   newArgsRef <- newTcRef []
   wrapper' <- everywhereM (mkM (rewriteWpLet newArgsRef)) wrapper
   tys <- readTcRef newArgsRef
@@ -186,7 +184,10 @@ rewriteWpLet newArgsRef (WpLet ev_binds) = do
 rewriteWpLet _ w = return w
 
 rewriteTcEvBinds :: TcEvBinds -> TcM ([EvVar], TcEvBinds)
-rewriteTcEvBinds ebs@(TcEvBinds _) = failTcM $ text "Encountered unzonked TcEvBinds, this should not happen" <+> ppr ebs
+rewriteTcEvBinds (TcEvBinds (CoEvBindsVar{})) = failTcM $ text "unexpected CoEvBindsVar"
+rewriteTcEvBinds (TcEvBinds (EvBindsVar{ebv_binds=ebv})) = do
+  ebm <- readTcRef ebv
+  rewriteTcEvBinds (EvBinds (evBindMapBinds ebm))
 rewriteTcEvBinds (EvBinds binds) = do
   let (binds', ev_vars) = runState (filterBagM isNotPlaceholder binds) []
   return (ev_vars, EvBinds binds')

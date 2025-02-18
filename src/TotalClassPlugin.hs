@@ -1,24 +1,24 @@
 {-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
-module TotalClassPlugin ( TotalityEvidence, CheckTotality(..), CheckTotalityResult(..), assertTotality, TotalConstraint(..)) where
+module TotalClassPlugin (TotalityEvidence, CheckTotality (..), CheckTotalityResult (..), assertTotality, TotalConstraint (..)) where
 
 import Data.Kind (Constraint, Type)
-import GHC.TypeLits (KnownNat, KnownChar, KnownSymbol)
+import GHC.TypeLits (KnownChar, KnownNat, KnownSymbol)
 
 type TotalityEvidence :: Constraint -> Type
-data TotalityEvidence c where UnsafeTotalityEvidence :: TotalityEvidence c deriving Show
+data TotalityEvidence c where UnsafeTotalityEvidence :: TotalityEvidence c deriving (Show)
 
 assertTotality :: TotalityEvidence c
 assertTotality = UnsafeTotalityEvidence
@@ -34,7 +34,6 @@ class CheckTotality c where
   checkTotality :: TotalityEvidence c
 
 type TotalConstraint :: Constraint -> Constraint
-
 class TotalConstraint c where
   _totalConstraintEvidence :: TotalityEvidence c
 

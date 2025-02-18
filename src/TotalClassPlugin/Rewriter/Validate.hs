@@ -1,15 +1,13 @@
 module TotalClassPlugin.Rewriter.Validate (checkNoPlaceholders) where
 
 import Data.Foldable (forM_)
-
+import Data.Generics (everywhereM, mkM)
+import GHC (AbsBinds (..), GhcTc, HsBind, HsBindLR (..), HsExpr (XExpr), HsIPBinds (IPBinds), HsLocalBinds, HsLocalBindsLR (HsIPBinds), HsWrap (HsWrap), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (WrapExpr))
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM)
-import GHC.Tc.Types.Evidence (HsWrapper (..), TcEvBinds (TcEvBinds, EvBinds), EvBind (eb_rhs))
-import GHC (HsBindLR (..), AbsBinds (..), LHsBind, HsBind, HsLocalBinds, HsLocalBindsLR (HsIPBinds), HsIPBinds (IPBinds), GhcTc, LHsExpr, HsExpr (XExpr), XXExprGhcTc (WrapExpr), HsWrap (HsWrap), LHsBinds)
-import Data.Generics (everywhereM, mkM)
-import TotalClassPlugin.Rewriter.Placeholder (isPlaceholder)
+import GHC.Tc.Types.Evidence (EvBind (eb_rhs), HsWrapper (..), TcEvBinds (EvBinds, TcEvBinds))
 import GHC.Tc.Utils.Monad (wrapLocMA)
-
+import TotalClassPlugin.Rewriter.Placeholder (isPlaceholder)
 import TotalClassPlugin.Rewriter.Utils
 
 checkNoPlaceholders :: LHsBinds GhcTc -> TcM ()
@@ -24,8 +22,8 @@ checkDoneLHsBind :: LHsBind GhcTc -> TcM (LHsBind GhcTc)
 checkDoneLHsBind = wrapLocMA checkDoneHsBind
 
 checkDoneHsBind :: HsBind GhcTc -> TcM (HsBind GhcTc)
-checkDoneHsBind xb@(XHsBindsLR (AbsBinds{abs_ev_binds=ev_binds})) = forM_ ev_binds (checkDoneTcEvBinds "AbsBinds:") >> return xb
-checkDoneHsBind fb@(FunBind {fun_ext=(wrap, _)}) = checkDoneHsWrapper "FunBind wrapper:" wrap >> return fb
+checkDoneHsBind xb@(XHsBindsLR (AbsBinds {abs_ev_binds = ev_binds})) = forM_ ev_binds (checkDoneTcEvBinds "AbsBinds:") >> return xb
+checkDoneHsBind fb@(FunBind {fun_ext = (wrap, _)}) = checkDoneHsWrapper "FunBind wrapper:" wrap >> return fb
 checkDoneHsBind b = return b
 
 checkDoneLHsExpr :: LHsExpr GhcTc -> TcM (LHsExpr GhcTc)

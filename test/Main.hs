@@ -1,21 +1,22 @@
-{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
+
 module Main (main) where
 
-import Data.Proxy
 import qualified Check
+import Data.Proxy
 import qualified Partial
 import qualified TestModule
 
-data MyNat = Z | S MyNat deriving Show
+data MyNat = Z | S MyNat deriving (Show)
 
 -- class C (x :: MyNat) (y :: MyNat) where
 --   showN :: String

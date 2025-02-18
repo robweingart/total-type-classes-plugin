@@ -1,19 +1,20 @@
-{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
+
 module Partial where
+
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import TotalClassPlugin
-
 
 data MyNat = Z | S MyNat
 
@@ -26,13 +27,14 @@ instance ListOfLength Int n where
 instance ListOfLength Bool Z where
   mkList = []
 
-instance ListOfLength Bool n => ListOfLength Bool (S n) where
+instance (ListOfLength Bool n) => ListOfLength Bool (S n) where
   mkList = False : mkList @Bool @n
 
-class SingI (a :: k) where
+class SingI (a :: k)
 
-instance SingI (a :: Bool) where
-instance SingI (a :: MyNat) where
+instance SingI (a :: Bool)
+
+instance SingI (a :: MyNat)
 
 instance TotalConstraint (ListOfLength Bool n) where
   _totalConstraintEvidence = checkTotality
@@ -40,7 +42,7 @@ instance TotalConstraint (ListOfLength Bool n) where
 instance TotalConstraint (SingI (a :: Bool)) where
   _totalConstraintEvidence = checkTotality
 
-foo :: forall (n :: MyNat). ListOfLength Bool n => Proxy n -> [Bool]
+foo :: forall (n :: MyNat). (ListOfLength Bool n) => Proxy n -> [Bool]
 foo (_ :: Proxy n) = mkList @Bool @n
 
 foo2 :: [Bool]

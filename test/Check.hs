@@ -1,26 +1,26 @@
-{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE ImpredicativeTypes #-}
+{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 
 module Check where
 
 import Data.Kind
 import TotalClassPlugin
 
-assertCheckResult :: forall c. CheckTotalityResult c => String -> Bool -> Bool -> Bool -> IO ()
+assertCheckResult :: forall c. (CheckTotalityResult c) => String -> Bool -> Bool -> Bool -> IO ()
 assertCheckResult str ex term ctxt = do
   putStrLn str
   case (isExhaustive @c, ex) of
@@ -50,59 +50,69 @@ assertCheckResult str ex term ctxt = do
 
 data MyNat = Z | S MyNat
 
-class IsNat (n :: MyNat) where
+class IsNat (n :: MyNat)
 
-instance IsNat Z where
-instance IsNat n => IsNat (S n) where
+instance IsNat Z
 
-class TestMultiParam (x :: MyNat) (y :: MyNat) where
+instance (IsNat n) => IsNat (S n)
 
-instance TestMultiParam Z Z where
+class TestMultiParam (x :: MyNat) (y :: MyNat)
 
-instance TestMultiParam Z y => TestMultiParam Z (S y) where
+instance TestMultiParam Z Z
 
-instance TestMultiParam x y => TestMultiParam (S x) y
+instance (TestMultiParam Z y) => TestMultiParam Z (S y)
 
-class TestNonEx (n :: MyNat) where
+instance (TestMultiParam x y) => TestMultiParam (S x) y
 
-instance TestNonEx Z where
+class TestNonEx (n :: MyNat)
 
---instance TestNonEx (S Z) where
+instance TestNonEx Z
 
-instance TestNonEx n => TestNonEx (S (S n))
+-- instance TestNonEx (S Z) where
 
-class TestNonTerm (n :: MyNat) where
+instance (TestNonEx n) => TestNonEx (S (S n))
+
+class TestNonTerm (n :: MyNat)
 
 instance TestNonTerm Z
-instance TestNonTerm (S n) => TestNonTerm (S n)
 
-class TestNonADT (a :: Type) (n :: MyNat) where
+instance (TestNonTerm (S n)) => TestNonTerm (S n)
+
+class TestNonADT (a :: Type) (n :: MyNat)
+
 instance TestNonADT a Z
-instance TestNonADT a n => TestNonADT a (S n)
 
-class TestNonADTBad (a :: Type) (n :: MyNat) where
+instance (TestNonADT a n) => TestNonADT a (S n)
+
+class TestNonADTBad (a :: Type) (n :: MyNat)
+
 instance TestNonADTBad (Bool -> Int) Z
-instance TestNonADTBad a n => TestNonADTBad a (S n)
 
-class TestCtxtBad (a :: Type) (n :: MyNat) where
+instance (TestNonADTBad a n) => TestNonADTBad a (S n)
+
+class TestCtxtBad (a :: Type) (n :: MyNat)
+
 instance TestCtxtBad a Z
+
 instance (TestCtxtBad a n, Monoid a) => TestCtxtBad a (S n)
 
-class TestEscape (a :: Type) (n :: MyNat) where
---instance TestEscape Bool n
+class TestEscape (a :: Type) (n :: MyNat)
+
+-- instance TestEscape Bool n
 instance TestEscape Int Z
+
 instance (TestEscape Bool n) => TestEscape Int (S n)
 
---instance TotalConstraint (TestNonEx n) where
+-- instance TotalConstraint (TestNonEx n) where
 --  _totalConstraintEvidence = checkTotality
 
---instance TotalConstraint (TestNonADTBad a n) where
+-- instance TotalConstraint (TestNonADTBad a n) where
 --  _totalConstraintEvidence = checkTotality
 
---instance TotalConstraint (TestNonTerm n) where
+-- instance TotalConstraint (TestNonTerm n) where
 --  _totalConstraintEvidence = checkTotality
 
---instance TotalConstraint (TestCtxtBad a n) where
+-- instance TotalConstraint (TestCtxtBad a n) where
 --  _totalConstraintEvidence = checkTotality
 
 instance TotalConstraint (IsNat n) where
@@ -113,51 +123,55 @@ instance TotalConstraint (TestMultiParam x y) where
 
 instance TotalConstraint (TestNonADT a n) where
   _totalConstraintEvidence = checkTotality
- 
+
 type Effect = (Type -> Type) -> (Type -> Type)
 
 class Append (xs :: [k]) (ys :: [k])
+
 instance Append '[] ys
-instance Append xs ys => Append (x ': xs) ys
+
+instance (Append xs ys) => Append (x ': xs) ys
+
 instance TotalConstraint (Append xs ys) where
   _totalConstraintEvidence = checkTotality
 
-class TestPair (a :: (MyNat, MyNat)) where
+class TestPair (a :: (MyNat, MyNat))
 
-instance TestPair '(Z, Z) where
+instance TestPair '(Z, Z)
 
-instance TestPair '(Z, y) => TestPair '(Z, S y) where
+instance (TestPair '(Z, y)) => TestPair '(Z, S y)
 
-instance TestPair '(x, y) => TestPair '(S x, y)
+instance (TestPair '(x, y)) => TestPair '(S x, y)
 
 instance TotalConstraint (TestPair a) where
   _totalConstraintEvidence = checkTotality
 
 --
---class TestPartial (a :: Type) (n :: MyNat)
---instance TestPartial Bool Z
---instance TestPartial Bool n => TestPartial Bool (S n)
---instance TotalConstraint (TestPartial Bool n) where
+-- class TestPartial (a :: Type) (n :: MyNat)
+-- instance TestPartial Bool Z
+-- instance TestPartial Bool n => TestPartial Bool (S n)
+-- instance TotalConstraint (TestPartial Bool n) where
 --  _totalConstraintEvidence = checkTotality
 
-class TestRepeat(x :: MyNat) (y :: MyNat)
+class TestRepeat (x :: MyNat) (y :: MyNat)
+
 instance TestRepeat x x
 
---type SingI :: forall {k}. k -> Constraint
---class SingI a where
+-- type SingI :: forall {k}. k -> Constraint
+-- class SingI a where
 --
---instance TotalConstraint (SingI (n :: MyNat)) where
+-- instance TotalConstraint (SingI (n :: MyNat)) where
 --  _totalConstraintEvidence = checkTotality
 
 testAll :: IO ()
 testAll = do
-  assertCheckResult @(forall x y. TestMultiParam x y) "TestMultiParam" True  True  True
-  assertCheckResult @(forall n.   TestNonEx      n  ) "TestNonEx"      False True  True
-  assertCheckResult @(forall n.   TestNonTerm    n  ) "TestNonTerm"    True  False True
-  assertCheckResult @(forall a n. TestNonADT     a n) "TestNonADT"     True  True  True
-  assertCheckResult @(forall a n. TestNonADTBad  a n) "TestNonADTBad"  False True  True
-  assertCheckResult @(forall a n. TestCtxtBad    a n) "TestCtxtBad"    True  True  False
-  assertCheckResult @(forall   n. TestEscape   Int n) "TestEscape"     True  True  False
+  assertCheckResult @(forall x y. TestMultiParam x y) "TestMultiParam" True True True
+  assertCheckResult @(forall n. TestNonEx n) "TestNonEx" False True True
+  assertCheckResult @(forall n. TestNonTerm n) "TestNonTerm" True False True
+  assertCheckResult @(forall a n. TestNonADT a n) "TestNonADT" True True True
+  assertCheckResult @(forall a n. TestNonADTBad a n) "TestNonADTBad" False True True
+  assertCheckResult @(forall a n. TestCtxtBad a n) "TestCtxtBad" True True False
+  assertCheckResult @(forall n. TestEscape Int n) "TestEscape" True True False
   assertCheckResult @(forall k (xs :: [k]) (ys :: [k]). Append xs ys) "Append" True True True
-  assertCheckResult @(forall x. TestRepeat x x)  "TestRepeatOk"    True True  True
-  assertCheckResult @(forall x y. TestRepeat x y)  "TestRepeatBad"    False True  True
+  assertCheckResult @(forall x. TestRepeat x x) "TestRepeatOk" True True True
+  assertCheckResult @(forall x y. TestRepeat x y) "TestRepeatBad" False True True

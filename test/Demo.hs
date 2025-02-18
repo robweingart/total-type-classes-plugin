@@ -1,10 +1,10 @@
-{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 
 module Demo where
 
@@ -18,6 +18,7 @@ data Vec (n :: Nat) a where
 
 vlength :: forall n a. Vec n a -> Nat
 vlength (_ :: Vec n a) = natToTerm @n
+
 --
 class IsNat (n :: Nat) where
   natToTerm :: Nat
@@ -25,11 +26,11 @@ class IsNat (n :: Nat) where
 instance IsNat Z where
   natToTerm = Z
 
-instance IsNat n => IsNat (S n) where
+instance (IsNat n) => IsNat (S n) where
   natToTerm = S (natToTerm @n)
 
 instance TotalConstraint (IsNat n) where
   _totalConstraintEvidence = checkTotality
 
---foo :: a -> String
---foo x = show x
+-- foo :: a -> String
+-- foo x = show x

@@ -36,11 +36,9 @@ instance SingI (a :: Bool)
 
 instance SingI (a :: MyNat)
 
-instance TotalConstraint (ListOfLength Bool n) where
-  _totalConstraintEvidence = checkTotality
+instance TotalConstraint (ListOfLength Bool n)
 
-instance TotalConstraint (SingI (a :: Bool)) where
-  _totalConstraintEvidence = checkTotality
+instance TotalConstraint (SingI (a :: Bool))
 
 foo :: forall (n :: MyNat). (ListOfLength Bool n) => Proxy n -> [Bool]
 foo (_ :: Proxy n) = mkList @Bool @n

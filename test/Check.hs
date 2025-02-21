@@ -116,13 +116,10 @@ instance (TestEscape Bool n) => TestEscape Int (S n)
 --  _totalConstraintEvidence = checkTotality
 
 instance TotalConstraint (IsNat n) where
-  _totalConstraintEvidence = checkTotality
 
-instance TotalConstraint (TestMultiParam x y) where
-  _totalConstraintEvidence = checkTotality
+instance TotalConstraint (TestMultiParam x y)
 
-instance TotalConstraint (TestNonADT a n) where
-  _totalConstraintEvidence = checkTotality
+instance TotalConstraint (TestNonADT a n)
 
 type Effect = (Type -> Type) -> (Type -> Type)
 
@@ -132,8 +129,7 @@ instance Append '[] ys
 
 instance (Append xs ys) => Append (x ': xs) ys
 
-instance TotalConstraint (Append xs ys) where
-  _totalConstraintEvidence = checkTotality
+instance TotalConstraint (Append xs ys)
 
 class TestPair (a :: (MyNat, MyNat))
 
@@ -143,8 +139,7 @@ instance (TestPair '(Z, y)) => TestPair '(Z, S y)
 
 instance (TestPair '(x, y)) => TestPair '(S x, y)
 
-instance TotalConstraint (TestPair a) where
-  _totalConstraintEvidence = checkTotality
+instance TotalConstraint (TestPair a)
 
 --
 -- class TestPartial (a :: Type) (n :: MyNat)

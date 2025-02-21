@@ -101,7 +101,7 @@ test-suite total-tc-plugin-test
     default-language: Haskell2010
 
     -- Modules included in this executable, other than Main.
-    other-modules: Check, Partial, TestModule
+    other-modules: Check, Partial, TestModule, Demo
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

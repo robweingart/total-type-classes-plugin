@@ -304,8 +304,7 @@ data Vec (n :: MyNat) a where
   VNil :: Vec Z a
   (:>) :: a -> Vec n a -> Vec (S n) a
 
-instance TotalConstraint (IsNat n) where
-  _totalConstraintEvidence = checkTotality
+instance TotalConstraint (IsNat n)
 
 vlength :: Vec n a -> MyNat
 vlength (_ :: Vec n a) = toNat @n
@@ -319,8 +318,7 @@ instance C Z y where
 instance (C n y) => C (S n) y where
   showN = "." ++ showN @n @y
 
-instance TotalConstraint (C x y) where
-  _totalConstraintEvidence = checkTotality
+instance TotalConstraint (C x y)
 
 -- f :: forall (m :: MyNat) (n :: MyNat). C m n => String
 -- f =  showN @m @n ++ f @(S m) @(S n)

@@ -11,6 +11,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE DefaultSignatures #-}
 
 module TotalClassPlugin (TotalityEvidence, CheckTotality (..), CheckTotalityResult (..), assertTotality, TotalConstraint (..)) where
 
@@ -36,6 +37,8 @@ class CheckTotality c where
 type TotalConstraint :: Constraint -> Constraint
 class TotalConstraint c where
   _totalConstraintEvidence :: TotalityEvidence c
+  default _totalConstraintEvidence :: CheckTotality c => TotalityEvidence c
+  _totalConstraintEvidence = checkTotality
 
 instance TotalConstraint (KnownNat n) where
   _totalConstraintEvidence = assertTotality

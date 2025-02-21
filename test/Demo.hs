@@ -8,7 +8,8 @@
 
 module Demo where
 
-import TotalClassPlugin (TotalConstraint (..), checkTotality)
+import TotalClassPlugin (TotalConstraint (..))
+-- import GHC.Exts (Any)
 
 data Nat = Z | S Nat
 
@@ -29,8 +30,11 @@ instance IsNat Z where
 instance (IsNat n) => IsNat (S n) where
   natToTerm = S (natToTerm @n)
 
-instance TotalConstraint (IsNat n) where
-  _totalConstraintEvidence = checkTotality
+instance TotalConstraint (IsNat n)
 
 -- foo :: a -> String
 -- foo x = show x
+
+
+-- x :: Nat
+-- x = natToTerm @Any

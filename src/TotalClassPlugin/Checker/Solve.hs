@@ -13,6 +13,7 @@ import GHC.Tc.Utils.Monad (setCtLocM)
 import GHC.Core.Predicate (Pred(..), classifyPredType)
 import GHC.Core.Class (classTyCon)
 import TotalClassPlugin.Checker.Check
+import GHC.Tc.Utils.TcType (tyCoVarsOfTypeList)
 
 getCheckClass :: TcPluginM Class
 getCheckClass = do
@@ -44,15 +45,18 @@ solveCheck ct = case classifyPredType (ctPred ct) of
     return Nothing
 
 check_inner :: Ct -> PredType -> Bool -> TcPluginM (Maybe (EvTerm, Ct))
-check_inner ct c fail_on_err = case classifyPredType c of
-  ForAllPred _ _ inner -> check_inner ct inner fail_on_err
-  ClassPred cls args -> do
-    res <- unsafeTcPluginTcM (setCtLocM (ctLoc ct) $ checkConstraint cls args fail_on_err)
-    ev_term <- if fail_on_err
-      then mk_check_inst c
-      else mk_check_result_inst c res
-    return $ Just (ev_term, ct)
-  _ -> return Nothing
+check_inner ct c fail_on_err = go free_vars (classifyPredType c)
+  where
+    free_vars = tyCoVarsOfTypeList c
+
+    go tvs (ForAllPred tvs' _ inner) = go (tvs ++ tvs') (classifyPredType inner)
+    go tvs (ClassPred cls args) = do
+      res <- unsafeTcPluginTcM (setCtLocM (ctLoc ct) $ checkConstraint tvs cls args fail_on_err)
+      ev_term <- if fail_on_err
+        then mk_check_inst c
+        else mk_check_result_inst c res
+      return $ Just (ev_term, ct)
+    go _ _ = return Nothing
 
 mk_check_inst :: PredType -> TcPluginM EvTerm
 mk_check_inst c = do

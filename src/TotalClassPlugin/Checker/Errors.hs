@@ -22,7 +22,7 @@ data TotalClassCheckerMessage = TotalNonExhaustive !(HsMatchContext GhcTc) !Exha
                               | TotalNonTerminating TcRnMessage
                               | TotalCheckerTHFailure String
                               | TotalCheckerTHFatal TcRnMessage
-                              | TotalCheckerInvalidContext Type PredType
+                              | TotalCheckerInvalidContext Type
                               | TotalError
 
 instance Diagnostic TotalClassCheckerMessage where
@@ -35,7 +35,7 @@ instance Diagnostic TotalClassCheckerMessage where
     TotalCheckerTHFailure str ->
       mkSimpleDecorated (text "Exhaustiveness check failed:" $$ text str)
     TotalCheckerTHFatal tc_msg -> mkSimpleDecorated (text "Unexpected fatal error during exhaustiveness check code gen:") `unionDecoratedSDoc` diagnosticMessage defaultOpts tc_msg
-    TotalCheckerInvalidContext tau pred_ty -> mkSimpleDecorated (text "Invalid constraint" <+> ppr pred_ty <+> text "in instance with head" <+> ppr tau)
+    TotalCheckerInvalidContext tau -> mkSimpleDecorated (text "Invalid constraints in instance with head" <+> ppr tau)
     TotalError -> mkSimpleDecorated $ text "Unexpected error"
 
   diagnosticReason _ = ErrorWithoutFlag

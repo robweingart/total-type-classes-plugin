@@ -102,7 +102,7 @@ instance ListOfMempty a Z where
 instance (ListOfMempty a n, Monoid a) => ListOfMempty a (S n) where
   mkList = mempty : mkList @a @n
 
--- instance Monoid a => TotalConstraint (ListOfMempty a n)
+instance TotalConstraint (ListOfMempty a n)
 
 -- instance TotalConstraint (forall a n. Monoid a => ListOfMempty a n)
 

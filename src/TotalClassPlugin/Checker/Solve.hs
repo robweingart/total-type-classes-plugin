@@ -33,19 +33,19 @@ getTotalityEvidenceType = do
   name <- lookupOrig md (mkTcOcc "TotalityEvidence")
   tcLookupTyCon name
 
-solveCheck :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
-solveCheck ct = case classifyPredType (ctPred ct) of
+solveCheck :: [Ct] -> Ct -> TcPluginM (Maybe (EvTerm, Ct))
+solveCheck givens ct = case classifyPredType (ctPred ct) of
   ClassPred targetClass [c] -> do
     checkClass <- getCheckClass
     checkResultClass <- getCheckResultClass
-    if | targetClass == checkClass ->       check_inner ct c True
-       | targetClass == checkResultClass -> check_inner ct c False
+    if | targetClass == checkClass ->       check_inner givens ct c True
+       | targetClass == checkResultClass -> check_inner givens ct c False
        | otherwise -> return Nothing
   _ -> do
     return Nothing
 
-check_inner :: Ct -> PredType -> Bool -> TcPluginM (Maybe (EvTerm, Ct))
-check_inner ct c fail_on_err = go free_vars [] (classifyPredType c)
+check_inner :: [Ct] -> Ct -> PredType -> Bool -> TcPluginM (Maybe (EvTerm, Ct))
+check_inner given_cts ct c fail_on_err = go free_vars (map ctPred given_cts) (classifyPredType c)
   where
     free_vars = tyCoVarsOfTypeList c
 

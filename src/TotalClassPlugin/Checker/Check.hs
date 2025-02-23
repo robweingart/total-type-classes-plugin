@@ -4,11 +4,10 @@
 
 module TotalClassPlugin.Checker.Check (checkConstraint) where
 
-import Control.Monad (filterM, unless, when)
-import Control.Monad.State (lift)
+import Control.Monad (filterM, unless)
 import Data.Foldable (Foldable (toList))
 import Data.Functor.Compose (Compose (Compose, getCompose))
-import Data.Maybe (isNothing, isJust)
+import Data.Maybe (isJust)
 import GHC (Class)
 import GHC.Core.Class (Class (className))
 import GHC.Core.InstEnv (ClsInst (..), getPotentialUnifiers, instanceBindFun, lookupInstEnv, instanceHead)
@@ -41,11 +40,10 @@ import GHC.Types.Unique (getKey)
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Syntax as TH
 import TotalClassPlugin.Checker.CM
-import TotalClassPlugin.Checker.Errors (TotalClassCheckerMessage (..), checkDsResult, checkQuasiError, checkTcRnResult, TotalFailureDetails (..), totalClassCheckerMessage, failWithTotal)
+import TotalClassPlugin.Checker.Errors (checkDsResult, checkQuasiError, checkTcRnResult, TotalFailureDetails (..))
 import TotalClassPlugin.Checker.TH (mkEvidenceFun)
-import TotalClassPlugin.GHCUtils (checkInstTermination, splitInstTyForValidity)
 import TotalClassPlugin.Rewriter.Utils (failTcM, outputTcM)
-import GHC.Tc.Utils.TcType (ltPatersonSize, pSizeClassPred, mkSpecSigmaTy, PatersonSize, PatersonCondFailure (PCF_TyVar), pSizeType)
+import GHC.Tc.Utils.TcType (ltPatersonSize, pSizeClassPred, mkSpecSigmaTy, PatersonSize, pSizeType)
 import GHC.Tc.Errors (reportUnsolved)
 import GHC.Types.Error (Messages(getMessages), MsgEnvelope (errMsgDiagnostic, MsgEnvelope))
 

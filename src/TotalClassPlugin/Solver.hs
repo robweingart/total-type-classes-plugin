@@ -18,9 +18,9 @@ totalTcPlugin _ =
         tcPluginStop = \_ -> return ()
       }
 
-solveCt :: Ct -> TcPluginM (Maybe (EvTerm, Ct))
-solveCt ct = do
-  res1 <- solveCheck ct
+solveCt :: [Ct] -> Ct -> TcPluginM (Maybe (EvTerm, Ct))
+solveCt givens ct = do
+  res1 <- solveCheck givens ct
   case res1 of
     Just res -> return $ Just res
     Nothing -> solveWithPlaceholder ct
@@ -28,8 +28,8 @@ solveCt ct = do
 solve :: () -> EvBindsVar -> [Ct] -> [Ct] -> TcPluginM TcPluginSolveResult
 solve () _ _ [] = do
   return $ TcPluginSolveResult [] [] []
-solve () _ _ wanteds = do
-  solvedCts <- mapMaybeM solveCt wanteds
+solve () _ givens wanteds = do
+  solvedCts <- mapMaybeM (solveCt givens) wanteds
   return $
     TcPluginSolveResult
       { tcPluginSolvedCts = solvedCts,

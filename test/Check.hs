@@ -6,6 +6,7 @@
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
@@ -72,6 +73,8 @@ instance TestNonEx Z
 
 instance (TestNonEx n) => TestNonEx (S (S n))
 
+-- instance TotalConstraint (TestNonEx n)
+
 class TestNonTerm (n :: MyNat)
 
 instance TestNonTerm Z
@@ -90,11 +93,18 @@ instance TestNonADTBad (Bool -> Int) Z
 
 instance (TestNonADTBad a n) => TestNonADTBad a (S n)
 
-class TestCtxtBad (a :: Type) (n :: MyNat)
+class ListOfMempty (a :: Type) (n :: MyNat) where
+  mkList :: [a]
 
-instance TestCtxtBad a Z
+instance ListOfMempty a Z where
+  mkList = []
 
-instance (TestCtxtBad a n, Monoid a) => TestCtxtBad a (S n)
+instance (ListOfMempty a n, Monoid a) => ListOfMempty a (S n) where
+  mkList = mempty : mkList @a @n
+
+-- instance Monoid a => TotalConstraint (ListOfMempty a n)
+
+-- instance TotalConstraint (forall a n. Monoid a => ListOfMempty a n)
 
 class TestEscape (a :: Type) (n :: MyNat)
 
@@ -102,6 +112,8 @@ class TestEscape (a :: Type) (n :: MyNat)
 instance TestEscape Int Z
 
 instance (TestEscape Bool n) => TestEscape Int (S n)
+
+-- instance TotalConstraint (TestEscape Int n)
 
 -- instance TotalConstraint (TestNonEx n) where
 --  _totalConstraintEvidence = checkTotality
@@ -165,7 +177,8 @@ testAll = do
   assertCheckResult @(forall n. TestNonTerm n) "TestNonTerm" True False True
   assertCheckResult @(forall a n. TestNonADT a n) "TestNonADT" True True True
   assertCheckResult @(forall a n. TestNonADTBad a n) "TestNonADTBad" False True True
-  assertCheckResult @(forall a n. TestCtxtBad a n) "TestCtxtBad" True True False
+  assertCheckResult @(forall a n. ListOfMempty a n) "ListOfMempty" True True False
+  assertCheckResult @(forall a n. Monoid a => ListOfMempty a n) "ListOfMempty" True True True
   assertCheckResult @(forall n. TestEscape Int n) "TestEscape" True True False
   assertCheckResult @(forall k (xs :: [k]) (ys :: [k]). Append xs ys) "Append" True True True
   assertCheckResult @(forall x. TestRepeat x x) "TestRepeatOk" True True True

@@ -4,16 +4,18 @@
 
 module TotalClassPlugin.Checker.Check (checkConstraint) where
 
-import Control.Monad (unless)
+import Control.Monad (filterM, unless, when)
 import Control.Monad.State (lift)
 import Data.Foldable (Foldable (toList))
 import Data.Functor.Compose (Compose (Compose, getCompose))
-import GHC (Class, instanceDFunId)
-import GHC.Core.InstEnv (ClsInst (..), getPotentialUnifiers, instanceBindFun, lookupInstEnv)
-import GHC.Core.Predicate (mkClassPred)
+import Data.Maybe (isNothing, isJust)
+import GHC (Class)
+import GHC.Core.Class (Class (className))
+import GHC.Core.InstEnv (ClsInst (..), getPotentialUnifiers, instanceBindFun, lookupInstEnv, instanceHead)
+import GHC.Core.Predicate (Pred (ClassPred), classifyPredType, mkClassPred)
 import GHC.Core.TyCo.Rep (Type (..))
-import GHC.Core.Unify (UnifyResultM (..), tcUnifyTysFG)
-import GHC.Data.Bag (emptyBag)
+import GHC.Core.Unify (UnifyResultM (..), tcMatchTys, tcUnifyTysFG)
+import GHC.Data.Bag (Bag, emptyBag, mapBagM, headMaybe)
 import GHC.HsToCore.Binds (dsTopLHsBinds)
 import GHC.HsToCore.Monad (initDsTc)
 import GHC.Plugins
@@ -24,14 +26,14 @@ import GHC.Tc.Module (rnTopSrcDecls, tcTopSrcDecls)
 import GHC.Tc.Solver (captureTopConstraints, solveWanteds)
 import GHC.Tc.Solver.Monad (runTcS)
 import GHC.Tc.Types (TcGblEnv (tcg_binds), TcM, getLclEnvTcLevel)
-import GHC.Tc.Types.Constraint (isSolvedWC, mkImplicWC, mkSimpleWC)
+import GHC.Tc.Types.Constraint (Implication (ic_binds), isSolvedWC, mkImplicWC, mkSimpleWC)
+import GHC.Tc.Types.Evidence (EvBind, EvBindsVar (..), evBindMapBinds)
 import GHC.Tc.Types.Origin (CtOrigin (..), SkolemInfoAnon (UnkSkol), unkSkol)
 import GHC.Tc.Utils.Env (tcExtendIdEnv, tcGetInstEnvs)
 import GHC.Tc.Utils.Instantiate (instDFunType, newWanteds, tcInstSkolTyVars)
-import GHC.Tc.Utils.Monad (getLclEnv)
+import GHC.Tc.Utils.Monad (getLclEnv, readTcRef)
 import qualified GHC.Tc.Utils.Monad as TcM
 import GHC.Tc.Utils.TcMType (newEvVars)
-import GHC.Tc.Utils.TcType (mkSpecSigmaTy)
 import GHC.Tc.Utils.Unify (buildImplicationFor)
 import GHC.Tc.Zonk.Type (zonkTopDecls)
 import GHC.ThToHs (convertToHsDecls)
@@ -39,23 +41,28 @@ import GHC.Types.Unique (getKey)
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Syntax as TH
 import TotalClassPlugin.Checker.CM
-import TotalClassPlugin.Checker.Errors (TotalClassCheckerMessage (..), checkDsResult, checkPaterson, checkQuasiError, checkTcRnResult)
+import TotalClassPlugin.Checker.Errors (TotalClassCheckerMessage (..), checkDsResult, checkQuasiError, checkTcRnResult, TotalFailureDetails (..), totalClassCheckerMessage, failWithTotal)
 import TotalClassPlugin.Checker.TH (mkEvidenceFun)
 import TotalClassPlugin.GHCUtils (checkInstTermination, splitInstTyForValidity)
-import TotalClassPlugin.Rewriter.Utils (failTcM)
+import TotalClassPlugin.Rewriter.Utils (failTcM, outputTcM)
+import GHC.Tc.Utils.TcType (ltPatersonSize, pSizeClassPred, mkSpecSigmaTy, PatersonSize, PatersonCondFailure (PCF_TyVar), pSizeType)
+import GHC.Tc.Errors (reportUnsolved)
+import GHC.Types.Error (Messages(getMessages), MsgEnvelope (errMsgDiagnostic, MsgEnvelope))
 
-checkConstraint :: [TyVar] -> Class -> [Type] -> Bool -> TcM (Bool, Bool, Bool)
-checkConstraint tvs cls args fail_on_err = runCM fail_on_err (checkConstraint' tvs cls args)
+checkConstraint :: [TyVar] -> [PredType] -> Class -> [Type] -> Bool -> TcM (Bool, Bool, Bool)
+checkConstraint tvs givens cls args fail_on_err = runCM fail_on_err (mkSpecSigmaTy tvs [] (mkClassPred cls args)) (checkConstraint' tvs givens cls args)
 
-checkConstraint' :: [TyVar] -> Class -> [Type] -> CM ()
-checkConstraint' tvs cls args = do
-  let original = mkSpecSigmaTy tvs [] (mkClassPred cls args)
-  (subst, vars) <- lift $ tcInstSkolTyVars unkSkol tvs
+checkConstraint' :: [TyVar] -> [PredType] -> Class -> [Type] -> CM ()
+checkConstraint' tvs givens cls args = do
+  liftTcM $ outputTcM "checking total constraint: " (mkSpecSigmaTy tvs givens (mkClassPred cls args))
+  liftTcM $ outputTcM "class: " (className cls)
+  (subst, vars) <- liftTcM $ tcInstSkolTyVars unkSkol tvs
+  givens' <- liftTcM $ newEvVars (substTys subst givens)
   let tys = substTys subst args
-  results <- lift $ get_all_unifiers cls tys
-  types <- mapM (check_instance original cls tys vars) results
-  ev_fun <- lift $ withThTypes (Compose types) (mkEvidenceFun . getCompose)
-  mb_ex_err <- either (return . Just) (lift . check_evidence_fun cls) ev_fun
+  results <- liftTcM $ get_all_unifiers cls tys
+  types <- mapM (check_instance givens' cls tys vars) results
+  ev_fun <- withThTypes (Compose types) (mkEvidenceFun . getCompose)
+  mb_ex_err <- either (return . Just) (check_evidence_fun cls) ev_fun
   maybeFailCM Exhaustiveness mb_ex_err
 
 get_all_unifiers :: Class -> [Type] -> TcM [ClsInst]
@@ -64,43 +71,64 @@ get_all_unifiers cls tys = do
   let (successful, potential, _) = lookupInstEnv False inst_envs cls tys
   return $ (fst <$> successful) ++ getPotentialUnifiers potential
 
-check_instance :: Type -> Class -> [Type] -> [TcTyVar] -> ClsInst -> CM [Type]
-check_instance original cls tys vars inst = do
-  lift (check_termination inst) >>= maybeFailCM Termination
+get_ev_binds :: EvBindsVar -> TcM (Bag EvBind)
+get_ev_binds (CoEvBindsVar {}) = return $ emptyBag
+get_ev_binds (EvBindsVar {ebv_binds = var}) = evBindMapBinds <$> readTcRef var
+
+check_instance :: [EvVar] -> Class -> [Type] -> [TcTyVar] -> ClsInst -> CM [Type]
+check_instance givens cls tys vars inst = do
+  liftTcM $ outputTcM "instance: " $ instanceHead inst
   let res = tcUnifyTysFG instanceBindFun (is_tys inst) tys
   case res of
     Unifiable subst_inst -> do
       let mb = map (lookupTyVar subst_inst) (is_tvs inst)
-      (_, cxt) <- lift $ instDFunType (is_dfun inst) mb
-      let cxt' = substTheta subst_inst cxt
-      case cxt' of
+      let (_, _, head_tys) = instanceHead inst
+      let head_psize = pSizeType (mkClassPred cls (substTys subst_inst head_tys))
+      (_, cxt) <- liftTcM $ instDFunType (is_dfun inst) mb
+      remaining <- filterM (fmap not . can_solve_recursively cls tys head_psize) $ substTheta subst_inst cxt
+      case remaining of
         [] -> return ()
         _ -> do
-          tc_level <- lift $ getLclEnvTcLevel <$> getLclEnv
-          wanteds <- lift $ newWanteds (GivenOrigin (UnkSkol emptyCallStack)) cxt'
-          givens <- lift $ newEvVars [original]
-          (implications, _) <- lift $ buildImplicationFor tc_level (UnkSkol emptyCallStack) vars givens (mkSimpleWC wanteds)
-          (wcs, _) <- lift $ runTcS $ solveWanteds (mkImplicWC implications)
+          liftTcM $ outputTcM "remaining constraints: " remaining
+          tc_level <- liftTcM $ getLclEnvTcLevel <$> getLclEnv
+          wanteds <- liftTcM $ newWanteds (GivenOrigin (UnkSkol emptyCallStack)) remaining
+          (implications, _) <- liftTcM $ buildImplicationFor tc_level (UnkSkol emptyCallStack) vars givens (mkSimpleWC wanteds)
+          (wcs, _) <- liftTcM $ runTcS $ solveWanteds (mkImplicWC implications)
+          liftTcM $ outputTcM "remaining wcs: " wcs
+          liftTcM $ outputTcM "ev binds: " =<< mapBagM (get_ev_binds . ic_binds) implications
           unless (isSolvedWC wcs) $ do
-            failCM Context (TotalCheckerInvalidContext (mkClassPred cls tys))
+            (_, msgs) <- liftTcM $ TcM.tryTc $ reportUnsolved wcs
+            case headMaybe (getMessages msgs) of
+              Nothing -> liftTcM $ failTcM $ text "failed to solve constraints from context, but no errors"
+              Just (MsgEnvelope{errMsgDiagnostic=err}) -> failCM Context (TotalContextNotSolved (mkClassPred cls tys) err)
       let patterns = substTys subst_inst (TyVarTy <$> vars)
       return patterns
-    MaybeApart _ _ -> lift $ failTcM $ text "bug! instance returned from lookup is MaybeApart"
-    SurelyApart -> lift $ failTcM $ text "bug! instance returned from lookup is SurelyApart"
+    MaybeApart _ _ -> liftTcM $ failTcM $ text "bug! instance returned from lookup is MaybeApart"
+    SurelyApart -> liftTcM $ failTcM $ text "bug! instance returned from lookup is SurelyApart"
 
-check_termination :: ClsInst -> TcM (Maybe TotalClassCheckerMessage)
-check_termination = checkPaterson . TcM.tryTc . uncurry checkInstTermination . splitInstTyForValidity . idType . is_dfun
+can_solve_recursively :: Class -> [Type] -> PatersonSize -> PredType -> CM Bool
+can_solve_recursively cls tys inst_head_psize pred_ty
+  | ClassPred cls' tys' <- classifyPredType pred_ty,
+    cls == cls' = do
+      unless (isJust (tcMatchTys tys tys')) $ failCM Context (TotalContextEscapes {tcc_msg_inst_head = mkClassPred cls tys, tcc_msg_wanted = pred_ty})
+      case (pSizeClassPred cls' tys' `ltPatersonSize` inst_head_psize) of
+        Nothing -> return ()
+        Just pcf -> failCM Termination (TotalContextNotSmaller  {tcc_msg_inst_head = mkClassPred cls tys, tcc_msg_wanted = pred_ty, tcc_msg_paterson_pcf = pcf})
+      return True
+  | otherwise = return False
 
-withThTypes :: (Traversable t) => t Type -> (t TH.Type -> TH.Q a) -> TcM (Either TotalClassCheckerMessage a)
+withThTypes :: (Traversable t) => t Type -> (t TH.Type -> TH.Q a) -> CM (Either TotalFailureDetails a)
 withThTypes types thing_inside = do
-  ty_ids <- mapM (TcM.newSysLocalId (fsLit "temp") OneTy) types
-  tcExtendIdEnv (toList ty_ids) $ checkQuasiError $ do
+  ty_ids <- liftTcM $ mapM (TcM.newSysLocalId (fsLit "temp") OneTy) types
+  original <- getOriginalConstraint
+  liftTcM $ tcExtendIdEnv (toList ty_ids) $ checkQuasiError original $ do
     th_types <- mapM (TH.reifyType . TH.mkNameU "temp" . toInteger . getKey . idUnique) ty_ids
     thing_inside th_types
 
-check_evidence_fun :: Class -> [TH.Dec] -> TcM (Maybe TotalClassCheckerMessage)
+check_evidence_fun :: Class -> [TH.Dec] -> CM (Maybe TotalFailureDetails)
 check_evidence_fun cls decs = do
-  tc_rn_result <- checkTcRnResult $ TcM.tryTc $ TcM.updTopFlags (flip wopt_unset Opt_WarnUnusedMatches) $ do
+  original <- getOriginalConstraint
+  tc_rn_result <- liftTcM $ checkTcRnResult original $ TcM.tryTc $ TcM.updTopFlags (flip wopt_unset Opt_WarnUnusedMatches) $ do
     ev_fun_binds <- case convertToHsDecls (Generated DoPmc) noSrcSpan decs of
       Left err -> TcM.failWithTc $ TcRnTHError (THSpliceFailed (RunSpliceFailure err))
       Right ev_fun_binds -> return ev_fun_binds
@@ -112,4 +140,5 @@ check_evidence_fun cls decs = do
     return binds
   case tc_rn_result of
     Left err -> return $ Just err
-    Right binds -> checkDsResult cls $ TcM.updTopFlags (flip wopt_set Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds
+    Right binds -> liftTcM $
+                   checkDsResult original cls $ TcM.updTopFlags (flip wopt_set Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds

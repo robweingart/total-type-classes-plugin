@@ -52,8 +52,8 @@ checkConstraint tvs givens cls args fail_on_err = runCM fail_on_err (mkSpecSigma
 
 checkConstraint' :: [TyVar] -> [PredType] -> Class -> [Type] -> CM ()
 checkConstraint' tvs givens cls args = do
-  liftTcM $ outputTcM "checking total constraint: " (mkSpecSigmaTy tvs givens (mkClassPred cls args))
-  liftTcM $ outputTcM "class: " (className cls)
+  -- liftTcM $ outputTcM "checking total constraint: " (mkSpecSigmaTy tvs givens (mkClassPred cls args))
+  -- liftTcM $ outputTcM "class: " (className cls)
   (subst, vars) <- liftTcM $ tcInstSkolTyVars unkSkol tvs
   givens' <- liftTcM $ newEvVars (substTys subst givens)
   let tys = substTys subst args
@@ -68,14 +68,14 @@ get_all_unifiers cls tys = do
   inst_envs <- tcGetInstEnvs
   let (successful, potential, _) = lookupInstEnv False inst_envs cls tys
   return $ (fst <$> successful) ++ getPotentialUnifiers potential
-
-get_ev_binds :: EvBindsVar -> TcM (Bag EvBind)
-get_ev_binds (CoEvBindsVar {}) = return $ emptyBag
-get_ev_binds (EvBindsVar {ebv_binds = var}) = evBindMapBinds <$> readTcRef var
+--
+-- get_ev_binds :: EvBindsVar -> TcM (Bag EvBind)
+-- get_ev_binds (CoEvBindsVar {}) = return $ emptyBag
+-- get_ev_binds (EvBindsVar {ebv_binds = var}) = evBindMapBinds <$> readTcRef var
 
 check_instance :: [EvVar] -> Class -> [Type] -> [TcTyVar] -> ClsInst -> CM [Type]
 check_instance givens cls tys vars inst = do
-  liftTcM $ outputTcM "instance: " $ instanceHead inst
+  -- liftTcM $ outputTcM "instance: " $ instanceHead inst
   let res = tcUnifyTysFG instanceBindFun (is_tys inst) tys
   case res of
     Unifiable subst_inst -> do
@@ -87,13 +87,13 @@ check_instance givens cls tys vars inst = do
       case remaining of
         [] -> return ()
         _ -> do
-          liftTcM $ outputTcM "remaining constraints: " remaining
+          -- liftTcM $ outputTcM "remaining constraints: " remaining
           tc_level <- liftTcM $ getLclEnvTcLevel <$> getLclEnv
           wanteds <- liftTcM $ newWanteds (GivenOrigin (UnkSkol emptyCallStack)) remaining
           (implications, _) <- liftTcM $ buildImplicationFor tc_level (UnkSkol emptyCallStack) vars givens (mkSimpleWC wanteds)
           (wcs, _) <- liftTcM $ runTcS $ solveWanteds (mkImplicWC implications)
-          liftTcM $ outputTcM "remaining wcs: " wcs
-          liftTcM $ outputTcM "ev binds: " =<< mapBagM (get_ev_binds . ic_binds) implications
+          -- liftTcM $ outputTcM "remaining wcs: " wcs
+          -- liftTcM $ outputTcM "ev binds: " =<< mapBagM (get_ev_binds . ic_binds) implications
           unless (isSolvedWC wcs) $ do
             (_, msgs) <- liftTcM $ TcM.tryTc $ reportUnsolved wcs
             case headMaybe (getMessages msgs) of

@@ -12,7 +12,7 @@
 {-# OPTIONS_GHC -dcore-lint #-}
 {-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 
-module TestModule (testExposedSimple, testExposedCall1, testExposedCall2, testAll) where
+module TestModule where
 
 import Data.Proxy
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
@@ -21,10 +21,12 @@ import TotalClassPlugin (TotalConstraint (..), checkTotality)
 testBaseline :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testBaseline x = symbolVal x
 
+--
 -- Function requiring rewrite
 testSimple :: forall (s :: Symbol). Proxy s -> String
 testSimple x = symbolVal x
 
+--
 -- Function requiring rewrite
 testExposedSimple :: forall (s :: Symbol). Proxy s -> String
 testExposedSimple x = symbolVal x
@@ -318,13 +320,74 @@ instance C Z y where
 instance (C n y) => C (S n) y where
   showN = "." ++ showN @n @y
 
-instance TotalConstraint (C x y)
+-- instance TotalConstraint (C x y)
+--
+testRankNCall :: String
+testRankNCall = go testSimple
+  where
+    go :: (forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String) -> String
+    go f = f (Proxy :: Proxy "testRankNCall")
+
+plus :: MyNat -> MyNat -> MyNat
+plus Z y = y
+plus (S x) y = S (plus x y)
+
+vlength' :: (IsNat n) => Vec n a -> MyNat
+vlength' (_ :: Vec n a) = toNat @n
+
+data VecSomeLength a where
+  VecSomeLength :: (IsNat n) => Vec n a -> VecSomeLength a
+
+--
+-- sumLengths :: [VecSomeLength a] -> MyNat
+-- sumLengths vs = foldr plus_length Z vs
+-- where
+--   plus_length :: VecSomeLength a -> MyNat -> MyNat
+--   plus_length (VecSomeLength v) n = vlength v `plus` n
+data VecList a where
+  VLNil :: VecList a
+  VLCons :: (IsNat n) => Vec n a -> VecList a -> VecList a
+
+foldrVecList :: forall a b. (forall n. (IsNat n) => Vec n a -> b -> b) -> b -> VecList a -> b
+foldrVecList f z = go
+  where
+    go VLNil = z
+    go (VLCons v vs) = f v (go vs)
+
+sumLengths :: VecList a -> MyNat
+sumLengths vs = foldrVecList (\v n -> vlength v `plus` n) Z vs
+
+elimVecSomeLength :: forall a b. (forall n. (IsNat n) => Vec n a -> b) -> VecSomeLength a -> b
+elimVecSomeLength f (VecSomeLength v) = f v
+
+sumLengths1 :: [VecSomeLength a] -> MyNat
+sumLengths1 vs = foldr (\v n -> elimVecSomeLength vlength v `plus` n) Z vs
+
+sumLengths2 :: [VecSomeLength a] -> MyNat
+sumLengths2 = go (\v n -> vlength v `plus` n)
+  where
+    go :: (forall n. (IsNat n) => Vec n a -> MyNat -> MyNat) -> [VecSomeLength a] -> MyNat
+    go _ [] = Z
+    go f (VecSomeLength v : vs) = f v (go f vs)
 
 -- f :: forall (m :: MyNat) (n :: MyNat). C m n => String
 -- f =  showN @m @n ++ f @(S m) @(S n)
 
 -- g :: forall (m :: MyNat) (n :: MyNat). C m n => String
 -- g =  showN @m @n ++ f @(S m) @(S n)
+
+examples :: Vec n String -> MyNat
+examples v =        vlLocal v 
+             `plus` vlLambda v 
+             `plus` vlEtaReduced v 
+             `plus` vlTypeApplied v 
+             `plus` vlExprSig v
+  where
+    vlLocal v = vlength v
+    vlLambda = \v -> vlength v
+    vlEtaReduced = vlength
+    vlTypeApplied = vlength @_ @String
+    vlExprSig = vlength :: forall m. Vec m String -> MyNat
 
 testAll :: IO ()
 testAll = do
@@ -391,6 +454,10 @@ testAll = do
   putStrLn $ testNestedEtaSimple (Proxy :: Proxy "testNestedEtaSimple")
   putStrLn $ testNestedEtaCall1 (Proxy :: Proxy "testNestedEtaCall1")
   putStrLn $ testNestedEtaCall2 (Proxy :: Proxy "testNestedEtaCall2")
+  putStrLn $ testRankNCall
   putStrLn $ show $ vlength ((2 :: Int) :> 3 :> VNil)
+  putStrLn $ show $ sumLengths (VLCons ("a" :> VNil) (VLCons ("b" :> "c" :> VNil) (VLCons ("d" :> VNil) VLNil)))
+  putStrLn $ show $ sumLengths1 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
+  putStrLn $ show $ sumLengths2 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
   -- putStrLn $ f @(S Z) @(S (S Z))
   return ()

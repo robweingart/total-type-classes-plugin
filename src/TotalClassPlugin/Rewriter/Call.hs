@@ -5,10 +5,10 @@
 
 module TotalClassPlugin.Rewriter.Call (rewriteCalls) where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless, when, forM, forM_)
 import Data.Generics (Data (gmapM), GenericM, everything, extM, mkQ)
 import Data.Maybe (isJust)
-import GHC (GhcTc, HsExpr (..), HsWrap (HsWrap), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (..), mkHsWrap)
+import GHC (GhcTc, HsExpr (..), HsWrap (HsWrap), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (..), mkHsWrap, LPat)
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.TyCo.Subst (elemSubst)
 import GHC.Data.Bag (emptyBag)
@@ -36,7 +36,7 @@ rewriteCalls ids binds cont
       checkNoPlaceholders binds
       getEnvs
   | otherwise = do
-      -- forM_ ids (outputTcM "")
+      -- forM_ ids $ outputTcM ""
       (binds', lie) <- captureTopConstraints $ rewriteCallsIn ids binds
       (gbl, lcl) <- getEnvs
       new_ev_binds <- restoreEnvs (gbl, lcl) $ simplifyTop lie
@@ -68,6 +68,7 @@ rewriteCallsIn :: UpdateEnv -> GenericM TcM
 rewriteCallsIn ids =
   gmapM (rewriteCallsIn ids)
     `extM` (wrapLocMA (rewriteWrapExpr ids (rewriteCallsIn ids)) :: LHsExpr GhcTc -> TcM (LHsExpr GhcTc))
+    -- `extM` (wrapLocMA (captureAndUpdatePat (rewriteCallsIn ids)) :: LMatch GhcTc -> TcM (LMatch GhcTc))
     `extM` (wrapLocMA (captureAndUpdateBind (rewriteCallsIn ids)) :: LHsBind GhcTc -> TcM (LHsBind GhcTc))
 
 data UpdateToApply = UpdateToApply {uta_origin :: CtOrigin, uta_new_theta :: TcThetaType, uta_last_ty_var :: TyVar}
@@ -82,12 +83,14 @@ rewriteWrapExpr updates inside outer = do
     _ -> gmapM inside outer
   where
     go_outer = do
+      -- outputFullTcM "go_outer " outer
       let old_ty = hsExprType outer
       (expr', maybe_update) <- go outer
       let new_ty = hsExprType expr'
       case (old_ty `eqType` new_ty, maybe_update) of
         (False, Nothing) -> failTcM $ text "no update but inner type changed " <+> ppr new_ty
-        (_, Just _) -> failTcM $ text "update not resolved"
+        (_, Just ((UpdateToApply{uta_new_theta=theta}), _)) -> do
+          failTcM $ text "Failed to insert added constraints" <+> ppr theta <+> text "into" <+> ppr outer
         (True, Nothing) -> return expr'
 
     go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe (UpdateToApply, Subst))
@@ -119,6 +122,7 @@ rewriteWrapExpr updates inside outer = do
         (Just _, Just _) -> failTcM $ text "two updates?"
         (Just (final_wrap, added_theta, last_tv), Nothing) -> return (final_wrap, Just (UpdateToApply {uta_origin = ExprSigOrigin, uta_new_theta = added_theta, uta_last_ty_var = last_tv}, emptySubst))
       let new_expr = XExpr (WrapExpr (HsWrap final_wrap new_inner))
+      -- outputTcM "subst" (snd <$> maybe_update)
       return (new_expr, maybe_update)
     go (HsAppType ty old_inner tok wc_type) = do
       (new_inner, maybe_update) <- wrapLocFstMA go old_inner
@@ -133,10 +137,19 @@ rewriteWrapExpr updates inside outer = do
     go (HsVar x (L l var))
       | Just update <- lookupDNameEnv updates $ varName var = do
           let new_ty = idType (new_id update)
+          -- outputTcM "starting update: " update
           return ((HsVar x (L l (setVarType var new_ty))), Just (UpdateToApply {uta_origin = OccurrenceOf (varName var), uta_new_theta = new_theta update, uta_last_ty_var = last_ty_var update}, emptySubst))
     go (HsApp x f arg) = do
-      (new_f, maybe_update) <- wrapLocFstMA go f
-      return (HsApp x new_f arg, maybe_update)
+      (new_f, f_update) <- wrapLocFstMA go f
+      (new_arg, arg_update) <- wrapLocFstMA go arg
+      maybe_update <- case (f_update, arg_update) of
+        (Nothing, Nothing) -> return Nothing
+        (Just update, Nothing) -> return (Just update)
+        (Nothing, Just update) -> do
+          outputTcM "Update from argument: " arg
+          return (Just update)
+        (Just _, Just _) -> failTcM $ text "Modified both function and argument of this call"
+      return (HsApp x new_f new_arg, maybe_update)
     go (ExprWithTySig x old_inner sig) = do
       (new_inner, maybe_update) <- wrapLocFstMA go old_inner
       return (ExprWithTySig x new_inner sig, maybe_update)

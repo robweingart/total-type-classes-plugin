@@ -19,6 +19,7 @@
 module Check where
 
 import Data.Kind
+import Data.Monoid
 import TotalClassPlugin
 
 assertCheckResult :: forall c. (CheckTotalityResult c) => String -> Bool -> Bool -> Bool -> IO ()
@@ -93,6 +94,8 @@ instance TestNonADTBad (Bool -> Int) Z
 
 instance (TestNonADTBad a n) => TestNonADTBad a (S n)
 
+-- instance TotalConstraint (TestNonADTBad a n)
+
 class ListOfMempty (a :: Type) (n :: MyNat) where
   mkList :: [a]
 
@@ -102,7 +105,8 @@ instance ListOfMempty a Z where
 instance (ListOfMempty a n, Monoid a) => ListOfMempty a (S n) where
   mkList = mempty : mkList @a @n
 
-instance TotalConstraint (ListOfMempty a n)
+instance TotalConstraint (ListOfMempty (Sum Int) n)
+-- instance Monoid a => TotalConstraint (ListOfMempty a n)
 
 -- instance TotalConstraint (forall a n. Monoid a => ListOfMempty a n)
 

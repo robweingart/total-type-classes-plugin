@@ -1,10 +1,10 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 
-module TotalClassPlugin.Rewriter.Capture (captureAndUpdateBind, captureConstraints, wrapperLams, addToWpLet) where
+module TotalClassPlugin.Rewriter.Capture (captureAndUpdateBind, captureAndUpdatePat, captureConstraints, wrapperLams, addToWpLet) where
 
 import Data.Generics (Data (gmapM), GenericM)
-import GHC (AbsBinds (AbsBinds, abs_binds, abs_ev_binds, abs_ev_vars, abs_exports, abs_sig, abs_tvs), GhcTc, HsBind, HsBindLR (..))
+import GHC (AbsBinds (AbsBinds, abs_binds, abs_ev_binds, abs_ev_vars, abs_exports, abs_sig, abs_tvs), GhcTc, HsBind, HsBindLR (..), Pat (ConPat, pat_con_ext), ConPatTc (..))
 import GHC.Data.Bag (unionBags)
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Stack (emptyCallStack)
@@ -23,6 +23,17 @@ captureAndUpdateBind inside b = do
   case maybe_ev_binds of
     Nothing -> return b'
     Just ev_binds -> insertTcEvBinds ev_binds b'
+
+captureAndUpdatePat :: GenericM TcM -> Pat GhcTc -> TcM (Pat GhcTc)
+captureAndUpdatePat inside p@(ConPat {pat_con_ext=ext}) = do
+  (binds, p') <- captureConstraints (cpt_tvs ext) (cpt_dicts ext) $ gmapM inside p
+  case p' of
+    ConPat {pat_con_ext=ext'} -> do
+      binds' <- addToTcEvBinds (cpt_binds ext') binds
+      return $ p { pat_con_ext=(ext' { cpt_binds=binds' }) }
+    _ -> failTcM $ text "Inner operation changed pattern type"
+captureAndUpdatePat inside p = gmapM inside p
+  
 
 captureConstraints :: [TyVar] -> [EvVar] -> TcM result -> TcM (TcEvBinds, result)
 captureConstraints [] [] thing_inside = do

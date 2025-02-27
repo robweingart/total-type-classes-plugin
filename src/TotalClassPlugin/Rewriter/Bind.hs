@@ -182,7 +182,7 @@ removePlaceholdersFromWrapper wrapper = do
     [] -> return Nothing
     [[]] -> return Nothing
     [new_ev_vars] -> do
-      target_tv <- findLastTyLamOfSet (tyCoVarsOfTypes $ map evVarPred new_ev_vars) wrapper'
+      target_tv <- findLastTyLamOfSet (map evVarPred new_ev_vars) wrapper'
       (tv, wrapper'') <- rewriteLastTyLamAfter new_ev_vars target_tv wrapper'
       return $ Just (wrapper'', map evVarPred new_ev_vars, tv)
     _ -> failTcM $ text "encountered multiple zonked WpLet, this should not happen"
@@ -211,15 +211,17 @@ isNotPlaceholder (EvBind {eb_lhs = evVar, eb_rhs = evTerm})
       return False
   | otherwise = return True
 
-findLastTyLamOfSet :: TyCoVarSet -> HsWrapper -> TcM TyVar
-findLastTyLamOfSet vars w = case go w of
+findLastTyLamOfSet :: [PredType] -> HsWrapper -> TcM TyVar
+findLastTyLamOfSet preds w = case go w of
   Nothing -> do
-    printLnTcM "Rewrote wrapper with no TyLam"
-    printWrapper 1 w
-    outputTcM "TyCoVars: " vars
-    failTcM (text "Wrapper has no WpTyLam" <+> ppr w)
+    -- printLnTcM "Rewrote wrapper with no TyLam"
+    -- printWrapper 1 w
+    -- outputTcM "TyCoVars: " vars
+    failTcM (text "Variables appearing in added constraints" <+> ppr preds <+> text "are not bound here")
   Just tv -> return tv
   where
+    vars = tyCoVarsOfTypes preds
+    
     go (WpCompose w1 w2) = case go w2 of
       Nothing -> go w1
       Just tv -> Just tv

@@ -370,6 +370,9 @@ sumLengths2 = go (\v n -> vlength v `plus` n)
     go _ [] = Z
     go f (VecSomeLength v : vs) = f v (go f vs)
 
+sumLengthsNice :: [VecSomeLength a] -> MyNat
+sumLengthsNice vs = foldr (\(VecSomeLength v) n -> vlength v `plus` n) Z vs
+
 -- f :: forall (m :: MyNat) (n :: MyNat). C m n => String
 -- f =  showN @m @n ++ f @(S m) @(S n)
 

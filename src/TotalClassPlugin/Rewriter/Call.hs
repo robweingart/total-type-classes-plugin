@@ -8,7 +8,7 @@ module TotalClassPlugin.Rewriter.Call (rewriteCalls) where
 import Control.Monad (unless, when, forM, forM_)
 import Data.Generics (Data (gmapM), GenericM, everything, extM, mkQ)
 import Data.Maybe (isJust)
-import GHC (GhcTc, HsExpr (..), HsWrap (HsWrap), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (..), mkHsWrap, LPat)
+import GHC (GhcTc, HsExpr (..), HsWrap (HsWrap), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (..), mkHsWrap, LPat, LMatch)
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.TyCo.Subst (elemSubst)
 import GHC.Data.Bag (emptyBag)
@@ -68,7 +68,7 @@ rewriteCallsIn :: UpdateEnv -> GenericM TcM
 rewriteCallsIn ids =
   gmapM (rewriteCallsIn ids)
     `extM` (wrapLocMA (rewriteWrapExpr ids (rewriteCallsIn ids)) :: LHsExpr GhcTc -> TcM (LHsExpr GhcTc))
-    -- `extM` (wrapLocMA (captureAndUpdatePat (rewriteCallsIn ids)) :: LMatch GhcTc -> TcM (LMatch GhcTc))
+    `extM` (wrapLocMA (captureAndUpdateMatch (rewriteCallsIn ids)) :: LMatch GhcTc (LHsExpr GhcTc) -> TcM (LMatch GhcTc (LHsExpr GhcTc)))
     `extM` (wrapLocMA (captureAndUpdateBind (rewriteCallsIn ids)) :: LHsBind GhcTc -> TcM (LHsBind GhcTc))
 
 data UpdateToApply = UpdateToApply {uta_origin :: CtOrigin, uta_new_theta :: TcThetaType, uta_last_ty_var :: TyVar}

@@ -373,6 +373,11 @@ sumLengths2 = go (\v n -> vlength v `plus` n)
 sumLengthsNice :: [VecSomeLength a] -> MyNat
 sumLengthsNice vs = foldr (\(VecSomeLength v) n -> vlength v `plus` n) Z vs
 
+data WrappedIsNat n where WrappedIsNat :: IsNat n => WrappedIsNat n
+
+letExistential :: WrappedIsNat n -> Vec n a -> MyNat
+letExistential x v = let WrappedIsNat = x in vlength v
+
 -- f :: forall (m :: MyNat) (n :: MyNat). C m n => String
 -- f =  showN @m @n ++ f @(S m) @(S n)
 
@@ -462,5 +467,7 @@ testAll = do
   putStrLn $ show $ sumLengths (VLCons ("a" :> VNil) (VLCons ("b" :> "c" :> VNil) (VLCons ("d" :> VNil) VLNil)))
   putStrLn $ show $ sumLengths1 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
   putStrLn $ show $ sumLengths2 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
+  putStrLn $ show $ sumLengthsNice [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
+  putStrLn $ show $ letExistential WrappedIsNat ("a" :> VNil)
   -- putStrLn $ f @(S Z) @(S (S Z))
   return ()

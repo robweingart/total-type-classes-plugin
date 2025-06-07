@@ -37,18 +37,14 @@
 -- The original code can be found in the following files:
 -- compiler/GHC/Core/Type.hs (piResultTys)
 -- compiler/GHC/Hs/Syn/Type.hs (PRType, prTypeType, liftPRType, hsWrapperType)
--- compiler/GHC/Tc/Validity.hs (splitInstTyForValidity, checkInstTermination)
 
-module TotalClassPlugin.GHCUtils (piResultTysSubst, hsWrapperTypeSubst, splitInstTyForValidity, checkInstTermination) where
+module TotalClassPlugin.GHCUtils (piResultTysSubst, hsWrapperTypeSubst) where
 
 import GHC.Core.Multiplicity (Scaled (..))
-import GHC.Core.Predicate (Pred (..), classifyPredType, isCTupleClass)
 import GHC.Core.TyCo.Rep (Type (..))
 import GHC.Plugins
-import GHC.Tc.Errors.Types (TcRnMessage (..))
 import GHC.Tc.Types.Evidence (HsWrapper (..))
-import GHC.Tc.Utils.Monad (TcM, failWithTc)
-import GHC.Tc.Utils.TcType (PatersonCondFailureContext (..), TcPredType, ltPatersonSize, pSizeClassPredX, pSizeType, pSizeTypeX, substTy)
+import GHC.Tc.Utils.TcType (substTy)
 
 -- Identical to GHC.Core.Type.piResultTys, except it also returns the computed substitution
 piResultTysSubst :: (HasDebugCallStack) => Type -> [Type] -> (Type, Subst)
@@ -118,44 +114,3 @@ hsWrapperTypeSubst wrap ty = prTypeType $ go wrap (ty, [], empty_subst)
     go (WpTyApp ta) = \(ty', tas, subst) -> (ty', ta : tas, subst)
     go (WpLet _) = id
     go (WpMultCoercion _) = id
-
--- Exactly the same as splitInstTyForValidity in GHC.Tc.Validity, which is not exported from that module
-splitInstTyForValidity :: Type -> (ThetaType, Type)
-splitInstTyForValidity = split_context [] . drop_foralls
-  where
-    drop_foralls :: Type -> Type
-    drop_foralls (ForAllTy (Bndr _tv argf) ty)
-      | isInvisibleForAllTyFlag argf = drop_foralls ty
-    drop_foralls ty = ty
-
-    split_context :: ThetaType -> Type -> (ThetaType, Type)
-    split_context preds (FunTy {ft_af = af, ft_arg = pred', ft_res = tau})
-      | isInvisibleFunArg af = split_context (pred' : preds) tau
-    split_context preds ty = (reverse preds, ty)
-
--- Exactly the same as checkInstTermination in GHC.Tc.Validity, which is not exported from that module
-checkInstTermination :: ThetaType -> TcPredType -> TcM ()
-checkInstTermination theta head_pred =
-  check_preds emptyVarSet theta
-  where
-    head_size = pSizeType head_pred
-    check_preds :: VarSet -> [PredType] -> TcM ()
-    check_preds foralld_tvs preds = mapM_ (check' foralld_tvs) preds
-
-    check' :: VarSet -> PredType -> TcM ()
-    check' foralld_tvs pred' =
-      case classifyPredType pred' of
-        EqPred {} -> return ()
-        IrredPred {} -> check2 (pSizeTypeX foralld_tvs pred')
-        ClassPred cls tys
-          | isCTupleClass cls ->
-              check_preds foralld_tvs tys
-          | otherwise ->
-              check2 (pSizeClassPredX foralld_tvs cls tys)
-        ForAllPred tvs _ head_pred' ->
-          check' (foralld_tvs `extendVarSetList` tvs) head_pred'
-      where
-        check2 pred_size =
-          case pred_size `ltPatersonSize` head_size of
-            Just pc_failure -> failWithTc $ TcRnPatersonCondFailure pc_failure InInstanceDecl pred' head_pred
-            Nothing -> return ()

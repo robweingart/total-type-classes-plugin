@@ -1,6 +1,4 @@
 {-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TemplateHaskellQuotes #-}
 
 module TotalClassPlugin.Checker.Solve ( solveCheck ) where
 

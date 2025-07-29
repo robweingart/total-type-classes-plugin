@@ -1,7 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE TemplateHaskellQuotes #-}
-
 module TotalClassPlugin.Checker.Check (checkConstraint) where
 
 import Control.Monad (filterM, unless)
@@ -9,7 +5,7 @@ import Data.Foldable (Foldable (toList))
 import Data.Functor.Compose (Compose (Compose, getCompose))
 import Data.Maybe (isJust)
 import GHC (Class)
-import GHC.Core.InstEnv (ClsInst (..), getPotentialUnifiers, instanceBindFun, lookupInstEnv, instanceHead)
+import GHC.Core.InstEnv (ClsInst (..), getCoherentUnifiers, instanceBindFun, lookupInstEnv, instanceHead)
 import GHC.Core.Predicate (Pred (ClassPred), classifyPredType, mkClassPred)
 import GHC.Core.TyCo.Rep (Type (..))
 import GHC.Core.Unify (UnifyResultM (..), tcMatchTys, tcUnifyTysFG)
@@ -63,7 +59,7 @@ get_all_unifiers :: Class -> [Type] -> TcM [ClsInst]
 get_all_unifiers cls tys = do
   inst_envs <- tcGetInstEnvs
   let (successful, potential, _) = lookupInstEnv False inst_envs cls tys
-  return $ (fst <$> successful) ++ getPotentialUnifiers potential
+  return $ (fst <$> successful) ++ getCoherentUnifiers potential
 
 check_instance :: [EvVar] -> Class -> [Type] -> [TcTyVar] -> ClsInst -> CM [Type]
 check_instance givens cls tys vars inst = do
@@ -115,15 +111,15 @@ check_evidence_fun :: Class -> [TH.Dec] -> CM (Maybe TotalFailureDetails)
 check_evidence_fun cls decs = do
   original <- getOriginalConstraint
   tc_rn_result <- liftTcM $ checkTcRnResult original $ TcM.tryTc $ TcM.updTopFlags (flip wopt_unset Opt_WarnUnusedMatches) $ do
-    ev_fun_binds <- case convertToHsDecls (Generated DoPmc) noSrcSpan decs of
+    ev_fun_binds <- case convertToHsDecls (Generated OtherExpansion DoPmc) noSrcSpan decs of
       Left err -> TcM.failWithTc $ TcRnTHError (THSpliceFailed (RunSpliceFailure err))
       Right ev_fun_binds -> return ev_fun_binds
     (group, Nothing) <- findSplice ev_fun_binds
-    (gbl_rn, rn_group) <- TcM.updGblEnv (\env -> env {tcg_binds = emptyBag}) $ rnTopSrcDecls group
+    (gbl_rn, rn_group) <- TcM.updGblEnv (\env -> env {tcg_binds = []}) $ rnTopSrcDecls group
     ((gbl_tc, _), _) <- captureTopConstraints $ TcM.setGblEnv gbl_rn $ tcTopSrcDecls rn_group
     (_, _, binds, _, _, _) <- TcM.setGblEnv gbl_tc $ zonkTopDecls emptyBag (tcg_binds gbl_tc) [] [] []
     return binds
   case tc_rn_result of
     Left err -> return $ Just err
     Right binds -> liftTcM $
-                   checkDsResult original cls $ TcM.updTopFlags (flip wopt_set Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds
+                   checkDsResult original cls $ TcM.updTopFlags (`wopt_set` Opt_WarnIncompletePatterns) $ initDsTc $ dsTopLHsBinds binds

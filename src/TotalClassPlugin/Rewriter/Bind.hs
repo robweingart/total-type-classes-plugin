@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 
 module TotalClassPlugin.Rewriter.Bind (rewriteBinds, removePlaceholdersFromWrapper) where

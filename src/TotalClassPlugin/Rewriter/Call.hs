@@ -1,14 +1,12 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TypeApplications #-}
 
 module TotalClassPlugin.Rewriter.Call (rewriteCalls) where
 
 import Control.Monad (unless, when)
 import Data.Generics (Data (gmapM), GenericM, everything, extM, mkQ)
 import Data.Maybe (isJust)
-import GHC (GhcTc, HsExpr (..), HsWrap (HsWrap), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (..), mkHsWrap, LMatch)
+import GHC (GhcTc, HsExpr (..), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (..), mkHsWrap, LMatch)
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.TyCo.Subst (elemSubst)
 import GHC.Data.Bag (emptyBag)
@@ -75,8 +73,8 @@ data UpdateToApply = UpdateToApply {uta_origin :: CtOrigin, uta_new_theta :: TcT
 rewriteWrapExpr :: UpdateEnv -> GenericM TcM -> HsExpr GhcTc -> TcM (HsExpr GhcTc)
 rewriteWrapExpr updates inside outer = do
   case outer of
-    (XExpr (WrapExpr _)) -> go_outer
-    (HsAppType _ _ _ _) -> go_outer
+    (XExpr (WrapExpr {})) -> go_outer
+    (HsAppType {}) -> go_outer
     (HsVar _ (L _ var))
       | Just _ <- lookupDNameEnv updates (varName var) -> failTcM $ text "call to modified function " <+> ppr outer <+> text " is not immediate child of a wrapper"
     _ -> gmapM inside outer
@@ -87,12 +85,12 @@ rewriteWrapExpr updates inside outer = do
       let new_ty = hsExprType expr'
       case (old_ty `eqType` new_ty, maybe_update) of
         (False, Nothing) -> failTcM $ text "no update but inner type changed " <+> ppr new_ty
-        (_, Just ((UpdateToApply{uta_new_theta=theta}), _)) -> do
+        (_, Just (UpdateToApply{uta_new_theta=theta}, _)) -> do
           failTcM $ text "Failed to insert added constraints" <+> ppr theta <+> text "into" <+> ppr outer
         (True, Nothing) -> return expr'
 
     go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe (UpdateToApply, Subst))
-    go expr@(XExpr (WrapExpr (HsWrap wrap old_inner))) = do
+    go expr@(XExpr (WrapExpr wrap old_inner)) = do
       let (tvs, evs) = wrapperLams wrap
       (ev_binds, (new_inner, update_result)) <- captureConstraints tvs evs $ do
         (new_inner, maybe_update) <- go old_inner
@@ -105,7 +103,7 @@ rewriteWrapExpr updates inside outer = do
         Right new_ev_apps -> do
           updated_wrap <- maybe_add_to_first_ty_app wrap_with_ev_binds new_ev_apps
           return (updated_wrap, Nothing)
-      let new_type_for_checking = hsExprType (XExpr (WrapExpr (HsWrap new_wrap new_inner)))
+      let new_type_for_checking = hsExprType (XExpr (WrapExpr new_wrap new_inner))
       unless (isJust remaining_update || hsExprType expr `eqType` new_type_for_checking) $
         failTcM $
           text "Type still different after update:"
@@ -119,22 +117,22 @@ rewriteWrapExpr updates inside outer = do
         (Nothing, maybe_update) -> return (new_wrap, maybe_update)
         (Just _, Just _) -> failTcM $ text "two updates?"
         (Just (final_wrap, added_theta, last_tv), Nothing) -> return (final_wrap, Just (UpdateToApply {uta_origin = ExprSigOrigin, uta_new_theta = added_theta, uta_last_ty_var = last_tv}, emptySubst))
-      let new_expr = XExpr (WrapExpr (HsWrap final_wrap new_inner))
+      let new_expr = XExpr (WrapExpr final_wrap new_inner)
       return (new_expr, maybe_update)
-    go (HsAppType ty old_inner tok wc_type) = do
+    go (HsAppType ty old_inner wc_type) = do
       (new_inner, maybe_update) <- wrapLocFstMA go old_inner
       let subst = snd $ piResultTysSubst (lhsExprType old_inner) [ty]
-      let new_expr = HsAppType ty new_inner tok wc_type
+      let new_expr = HsAppType ty new_inner wc_type
       mk_ev_apps_for_update subst maybe_update >>= \case
         Left remaining_update -> return (new_expr, Just remaining_update)
         Right new_ev_apps -> return (mkHsWrap new_ev_apps new_expr, Nothing)
-    go (HsPar x l_tok old_inner r_tok) = do
+    go (HsPar x old_inner ) = do
       (new_inner, maybe_update) <- wrapLocFstMA go old_inner
-      return (HsPar x l_tok new_inner r_tok, maybe_update)
+      return (HsPar x new_inner, maybe_update)
     go (HsVar x (L l var))
       | Just update <- lookupDNameEnv updates $ varName var = do
           let new_ty = idType (new_id update)
-          return ((HsVar x (L l (setVarType var new_ty))), Just (UpdateToApply {uta_origin = OccurrenceOf (varName var), uta_new_theta = new_theta update, uta_last_ty_var = last_ty_var update}, emptySubst))
+          return (HsVar x (L l (setVarType var new_ty)), Just (UpdateToApply {uta_origin = OccurrenceOf (varName var), uta_new_theta = new_theta update, uta_last_ty_var = last_ty_var update}, emptySubst))
     go (HsApp x f arg) = do
       (new_f, f_update) <- wrapLocFstMA go f
       (new_arg, arg_update) <- wrapLocFstMA go arg

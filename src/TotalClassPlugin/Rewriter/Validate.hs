@@ -2,7 +2,7 @@ module TotalClassPlugin.Rewriter.Validate (checkNoPlaceholders) where
 
 import Data.Foldable (forM_)
 import Data.Generics (everywhereM, mkM)
-import GHC (AbsBinds (..), GhcTc, HsBind, HsBindLR (..), HsExpr (XExpr), HsIPBinds (IPBinds), HsLocalBinds, HsLocalBindsLR (HsIPBinds), HsWrap (HsWrap), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (WrapExpr))
+import GHC (AbsBinds (..), GhcTc, HsBind, HsBindLR (..), HsExpr (XExpr), HsIPBinds (IPBinds), HsLocalBinds, HsLocalBindsLR (HsIPBinds), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (WrapExpr))
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcM)
 import GHC.Tc.Types.Evidence (EvBind (eb_rhs), HsWrapper (..), TcEvBinds (EvBinds, TcEvBinds))
@@ -30,7 +30,7 @@ checkDoneLHsExpr :: LHsExpr GhcTc -> TcM (LHsExpr GhcTc)
 checkDoneLHsExpr = wrapLocMA checkDoneHsExpr
 
 checkDoneHsExpr :: HsExpr GhcTc -> TcM (HsExpr GhcTc)
-checkDoneHsExpr expr@(XExpr (WrapExpr (HsWrap wrap _))) = checkDoneHsWrapper "Expression wrapper:" wrap >> return expr
+checkDoneHsExpr expr@(XExpr (WrapExpr wrap _)) = checkDoneHsWrapper "Expression wrapper:" wrap >> return expr
 checkDoneHsExpr expr = return expr
 
 checkDoneHsWrapper :: String -> HsWrapper -> TcM HsWrapper

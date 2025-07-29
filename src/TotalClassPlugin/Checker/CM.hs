@@ -1,6 +1,4 @@
-{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TemplateHaskellQuotes #-}
 
 module TotalClassPlugin.Checker.CM ( CheckResult, CheckState, CM, CheckName (..), successfulResult, failCM, maybeFailCM, runCM, liftTcM, getOriginalConstraint ) where
 

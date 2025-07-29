@@ -16,6 +16,7 @@ import GHC.Tc.Utils.Monad (updTcRef)
 import GHC.Tc.Utils.TcType (mkTyVarNamePairs)
 import GHC.Tc.Utils.Unify (checkConstraints)
 import TotalClassPlugin.Rewriter.Utils
+import qualified Data.List.NonEmpty as NonEmpty
 
 captureAndUpdateBind :: GenericM TcM -> HsBind GhcTc -> TcM (HsBind GhcTc)
 captureAndUpdateBind inside b = do
@@ -25,36 +26,36 @@ captureAndUpdateBind inside b = do
     Just ev_binds -> insertTcEvBinds ev_binds b'
 
 captureAndUpdateMatch :: GenericM TcM -> Match GhcTc (LHsExpr GhcTc) -> TcM (Match GhcTc (LHsExpr GhcTc))
-captureAndUpdateMatch inside m@(Match {m_pats=pats,m_grhss=grhss}) = do
-  (pats', grhss') <- go_lpats pats $ gmapM inside grhss 
-  return $ m {m_pats=pats',m_grhss=grhss'}
+captureAndUpdateMatch inside m@(Match {m_pats=(L loc pats),m_grhss=grhss}) = do
+  (pats', grhss') <- go_lpats pats $ gmapM inside grhss
+  return $ m {m_pats=L loc pats',m_grhss=grhss'}
   where
     go_lpats :: [LPat GhcTc] -> TcM result -> TcM ([LPat GhcTc], result)
     go_lpats [] thing_inside = do
       res <- thing_inside
       return ([], res)
-    go_lpats (L loc p : ps) thing_inside = do
-      (p', (ps', res)) <- go_pat p $ go_lpats ps $ thing_inside
-      return (L loc p' : ps', res)
+    go_lpats (L loc' p : ps) thing_inside = do
+      (p', (ps', res)) <- go_pat p $ go_lpats ps thing_inside
+      return (L loc' p' : ps', res)
 
     go_lpat :: LPat GhcTc -> TcM result -> TcM (LPat GhcTc, result)
-    go_lpat (L loc pat) thing_inside = do
+    go_lpat (L loc' pat) thing_inside = do
       (pat', result) <- go_pat pat thing_inside
-      return (L loc pat', result)
+      return (L loc' pat', result)
 
 
     go_pat :: Pat GhcTc -> TcM result -> TcM (Pat GhcTc, result)
-    go_pat p@(WildPat _) thing_inside = (,) p <$> thing_inside 
-    go_pat p@(VarPat _ _) thing_inside = (,) p <$> thing_inside 
+    go_pat p@(WildPat _) thing_inside = (,) p <$> thing_inside
+    go_pat p@(VarPat _ _) thing_inside = (,) p <$> thing_inside
     go_pat (LazyPat ext inner) thing_inside = do
       (inner', result) <- go_lpat inner thing_inside
       return (LazyPat ext inner', result)
-    go_pat (AsPat ext lid tok inner) thing_inside = do
+    go_pat (AsPat ext lid inner) thing_inside = do
       (inner', result) <- go_lpat inner thing_inside
-      return (AsPat ext lid tok inner', result)
-    go_pat (ParPat ext open inner close) thing_inside = do
+      return (AsPat ext lid inner', result)
+    go_pat (ParPat ext inner) thing_inside = do
       (inner', result) <- go_lpat inner thing_inside
-      return (ParPat ext open inner' close, result)
+      return (ParPat ext inner', result)
     go_pat (BangPat ext inner) thing_inside = do
       (inner', result) <- go_lpat inner thing_inside
       return (BangPat ext inner', result)
@@ -64,6 +65,9 @@ captureAndUpdateMatch inside m@(Match {m_pats=pats,m_grhss=grhss}) = do
     go_pat (TuplePat ext lpats boxity) thing_inside = do
       (lpats', result) <- go_lpats lpats thing_inside
       return (TuplePat ext lpats' boxity, result)
+    go_pat (OrPat ext lpats) thing_inside = do
+      (lpats', result) <- go_lpats (NonEmpty.toList lpats) thing_inside
+      return (OrPat ext (NonEmpty.fromList lpats'), result)
     go_pat (SumPat ext inner con_tag sum_width) thing_inside = do
       (inner', result) <- go_lpat inner thing_inside
       return (SumPat ext inner' con_tag sum_width, result)
@@ -75,19 +79,21 @@ captureAndUpdateMatch inside m@(Match {m_pats=pats,m_grhss=grhss}) = do
       (inner', result) <- go_lpat inner thing_inside
       return (ViewPat ext fun inner', result)
     go_pat (SplicePat ext _) _ = dataConCantHappen ext
-    go_pat p@(LitPat _ _) thing_inside = (,) p <$> thing_inside 
-    go_pat p@(NPat _ _ _ _) thing_inside = (,) p <$> thing_inside 
-    go_pat p@(NPlusKPat _ _ _ _ _ _) thing_inside = (,) p <$> thing_inside 
+    go_pat p@(LitPat {}) thing_inside = (,) p <$> thing_inside
+    go_pat p@(NPat {}) thing_inside = (,) p <$> thing_inside
+    go_pat p@(NPlusKPat {}) thing_inside = (,) p <$> thing_inside
     go_pat (SigPat ext inner sig) thing_inside = do
       (inner', result) <- go_lpat inner thing_inside
       return (SigPat ext inner' sig, result)
+    go_pat p@(EmbTyPat {}) thing_inside = (,) p <$> thing_inside
+    go_pat p@(InvisPat {}) thing_inside = (,) p <$> thing_inside
     go_pat (XPat p@(CoPat { co_pat_inner=inner })) thing_inside = do
       (inner', result) <- go_pat inner thing_inside
       return (XPat (p { co_pat_inner=inner' }), result)
     go_pat (XPat (ExpansionPat rn tc)) thing_inside = do
       (tc', result) <- go_pat tc thing_inside
       return (XPat (ExpansionPat rn tc'), result)
-      
+
 
 captureConstraints :: [TyVar] -> [EvVar] -> TcM result -> TcM (TcEvBinds, result)
 captureConstraints [] [] thing_inside = do
@@ -96,8 +102,7 @@ captureConstraints [] [] thing_inside = do
 captureConstraints tvs given thing_inside = do
   (new_ev_binds, result) <-
     checkConstraints (UnkSkol emptyCallStack) tvs given $
-      tcExtendNameTyVarEnv (mkTyVarNamePairs tvs) $
-        thing_inside
+      tcExtendNameTyVarEnv (mkTyVarNamePairs tvs) thing_inside
   return (new_ev_binds, result)
 
 addToWpLet :: TcEvBinds -> HsWrapper -> TcM HsWrapper
@@ -137,10 +142,10 @@ wrapperLams w = go w ([], [])
 reskolemiseBind :: HsBind GhcTc -> TcM result -> TcM (Maybe TcEvBinds, result)
 reskolemiseBind (FunBind {fun_ext = (wrap, _)}) thing_inside = do
   let (tvs, evs) = wrapperLams wrap
-  (binds, result) <- captureConstraints tvs evs $ thing_inside
+  (binds, result) <- captureConstraints tvs evs thing_inside
   return (Just binds, result)
 reskolemiseBind (XHsBindsLR (AbsBinds {abs_tvs = tvs, abs_ev_vars = evs})) thing_inside = do
-  (binds, result) <- captureConstraints tvs evs $ thing_inside
+  (binds, result) <- captureConstraints tvs evs thing_inside
   return (Just binds, result)
 reskolemiseBind _ thing_inside = do
   result <- thing_inside

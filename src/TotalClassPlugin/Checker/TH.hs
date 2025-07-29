@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 
 module TotalClassPlugin.Checker.TH ( mkEvidenceFun ) where
 
@@ -16,7 +16,7 @@ mk_inst pat_types = do
   return $ Clause pats (NormalB body) []
 
 demoteToPats :: [Type] -> Q [Pat]
-demoteToPats ts = mapM demoteToPat ts
+demoteToPats = mapM demoteToPat
 
 demoteToPat :: Type -> Q Pat
 demoteToPat t = go t []
@@ -31,7 +31,7 @@ demoteToPat t = go t []
       p2 <- demoteToPat t2
       return $ InfixP p1 name p2
     go (ParensT t') args = go t' args
-    go (PromotedTupleT _) args = tupP args 
+    go (PromotedTupleT _) args = tupP args
     go (PromotedNilT) [] = listP []
     go (PromotedConsT) args = conP '(:) args
     go (LitT (NumTyLit n)) [] = litP (IntegerL n)

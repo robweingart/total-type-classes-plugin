@@ -1,10 +1,8 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module TotalClassPlugin.Checker.Errors where
 
-import GHC (GhcTc)
+import GHC (HsMatchContextRn)
 import GHC.Core.Class (Class (..))
 import GHC.Data.Bag (headMaybe, mapMaybeBag, partitionBagWith)
 import GHC.Hs.Expr (HsMatchContext (..))
@@ -27,7 +25,7 @@ totalClassCheckerMessage :: PredType -> TotalFailureDetails -> TotalClassChecker
 totalClassCheckerMessage original details = TotalClassCheckerMessage { tcc_msg_original = original, tcc_msg_details = details }
 
 data TotalFailureDetails
-  = TotalNonExhaustive !(HsMatchContext GhcTc) !ExhaustivityCheckType !MaxUncoveredPatterns [Id] [Nabla]
+  = TotalNonExhaustive !HsMatchContextRn !ExhaustivityCheckType !MaxUncoveredPatterns [Id] [Nabla]
   | TotalTHFailure String
   | TotalTHFatal TcRnMessage
   | TotalContextEscapes {tcc_msg_inst_head :: PredType, tcc_msg_wanted :: PredType}

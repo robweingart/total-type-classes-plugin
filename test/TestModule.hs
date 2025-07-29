@@ -9,6 +9,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeAbstractions #-}
 {-# LANGUAGE TypeApplications #-}
 {-# OPTIONS_GHC -dcore-lint #-}
 {-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
@@ -330,17 +331,26 @@ testRankNCall = go testSimple
     go :: (forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String) -> String
     go f = f (Proxy :: Proxy "testRankNCall")
 
-testVis1 :: forall (s :: Symbol) -> KnownSymbol s => String
-testVis1 (type s) = testSimple (Proxy :: Proxy s)
+-- Instantiate a rewritten function using a type variable obtained from TypeAbstractions
+testTypeAbsCall1 :: forall (s :: Symbol). KnownSymbol s => String
+testTypeAbsCall1 @s' = testSimple (Proxy :: Proxy s')
 
+-- The `Proxy` argument is only here to stop GHC from complaining about `s` being unused
+-- (note such an unused forall would always be pointless without rewriting)
+testTypeAbsCall2 :: forall (s :: Symbol). Proxy s -> String
+testTypeAbsCall2 @s' _ = testSimple (Proxy :: Proxy s')
+
+--testVis1 :: forall (s :: Symbol) -> KnownSymbol s => String
+--testVis1 (type s') = testSimple (Proxy :: Proxy s')
+--
 --testVis2 :: forall (s :: Symbol) -> String
 --testVis2 (type s) = testSimple (Proxy :: Proxy s)
-
-testVisCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
-testVisCall1 (Proxy :: Proxy s) = testVis1 (type s)
-
-testVisCall2 :: forall (s :: Symbol). Proxy s -> String
-testVisCall2 (Proxy :: Proxy s) = testVis1 (type s)
+--
+--testVisCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+--testVisCall1 (Proxy :: Proxy s) = testVis1 (type s)
+--
+--testVisCall2 :: forall (s :: Symbol). Proxy s -> String
+--testVisCall2 (Proxy :: Proxy s) = testVis1 (type s)
 
 
 plus :: MyNat -> MyNat -> MyNat
@@ -466,6 +476,8 @@ testAll = do
   putStrLn $ testNestedEtaCall1 (Proxy :: Proxy "testNestedEtaCall1")
   putStrLn $ testNestedEtaCall2 (Proxy :: Proxy "testNestedEtaCall2")
   putStrLn $ testRankNCall
+  putStrLn $ testTypeAbsCall1  @"testTypeAbsCall1"
+  putStrLn $ testTypeAbsCall2  (Proxy :: Proxy "testTypeAbsCall2")
   putStrLn $ show $ vlength ((2 :: Int) :> 3 :> VNil)
   putStrLn $ show $ sumLengths (VLCons ("a" :> VNil) (VLCons ("b" :> "c" :> VNil) (VLCons ("d" :> VNil) VLNil)))
   putStrLn $ show $ sumLengths1 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]

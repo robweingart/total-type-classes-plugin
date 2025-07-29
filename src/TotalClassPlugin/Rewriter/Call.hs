@@ -6,7 +6,7 @@ module TotalClassPlugin.Rewriter.Call (rewriteCalls) where
 import Control.Monad (unless, when)
 import Data.Generics (Data (gmapM), GenericM, everything, extM, mkQ)
 import Data.Maybe (isJust)
-import GHC (GhcTc, HsExpr (..), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (..), mkHsWrap, LMatch)
+import GHC (GhcTc, HsExpr (..), LHsBind, LHsBinds, LHsExpr, LMatch, XXExprGhcTc (..), mkHsWrap)
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.TyCo.Subst (elemSubst)
 import GHC.Data.Bag (emptyBag)
@@ -85,9 +85,10 @@ rewriteWrapExpr updates inside outer = do
       let new_ty = hsExprType expr'
       case (old_ty `eqType` new_ty, maybe_update) of
         (False, Nothing) -> failTcM $ text "no update but inner type changed " <+> ppr new_ty
-        (_, Just (UpdateToApply{uta_new_theta=theta}, _)) -> do
+        (_, Just (UpdateToApply {uta_new_theta = theta}, _)) -> do
           failTcM $ text "Failed to insert added constraints" <+> ppr theta <+> text "into" <+> ppr outer
-        (True, Nothing) -> return expr'
+        (True, Nothing) -> do
+          return expr'
 
     go :: HsExpr GhcTc -> TcM (HsExpr GhcTc, Maybe (UpdateToApply, Subst))
     go expr@(XExpr (WrapExpr wrap old_inner)) = do
@@ -107,11 +108,10 @@ rewriteWrapExpr updates inside outer = do
       unless (isJust remaining_update || hsExprType expr `eqType` new_type_for_checking) $
         failTcM $
           text "Type still different after update:"
-            <+> ( vcat $
-                    [ text "old:" <+> ppr (hsExprType expr),
-                      text "new:" <+> ppr new_type_for_checking
-                    ]
-                )
+            <+> vcat
+              [ text "old:" <+> ppr (hsExprType expr),
+                text "new:" <+> ppr new_type_for_checking
+              ]
       remove_placeholders_result <- removePlaceholdersFromWrapper new_wrap
       (final_wrap, maybe_update) <- case (remove_placeholders_result, remaining_update) of
         (Nothing, maybe_update) -> return (new_wrap, maybe_update)
@@ -126,7 +126,7 @@ rewriteWrapExpr updates inside outer = do
       mk_ev_apps_for_update subst maybe_update >>= \case
         Left remaining_update -> return (new_expr, Just remaining_update)
         Right new_ev_apps -> return (mkHsWrap new_ev_apps new_expr, Nothing)
-    go (HsPar x old_inner ) = do
+    go (HsPar x old_inner) = do
       (new_inner, maybe_update) <- wrapLocFstMA go old_inner
       return (HsPar x new_inner, maybe_update)
     go (HsVar x (L l var))
@@ -140,7 +140,6 @@ rewriteWrapExpr updates inside outer = do
         (Nothing, Nothing) -> return Nothing
         (Just update, Nothing) -> return (Just update)
         (Nothing, Just update) -> do
-          outputTcM "Update from argument: " arg
           return (Just update)
         (Just _, Just _) -> failTcM $ text "Modified both function and argument of this call"
       return (HsApp x new_f new_arg, maybe_update)
@@ -179,7 +178,7 @@ maybe_add_to_first_ty_app wrap new_wrap = case go wrap of
   Just wrap' -> return wrap'
   where
     go (WpCompose w1 w2) = case go w1 of
-      Nothing -> fmap (w1 <.>) $ go w2
+      Nothing -> (w1 <.>) <$> go w2
       Just w1' -> Just (w1' <.> w2)
     go w@(WpTyApp _) = Just (new_wrap <.> w)
     go _ = Nothing

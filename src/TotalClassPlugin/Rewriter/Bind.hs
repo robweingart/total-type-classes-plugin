@@ -1,9 +1,10 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 
 module TotalClassPlugin.Rewriter.Bind (rewriteBinds, removePlaceholdersFromWrapper) where
 
-import Control.Monad (unless, when)
-import Control.Monad.State (MonadState (get, put), State, modify, runState)
+import Control.Monad (forM_, unless, when)
+import Control.Monad.State (MonadState (get, put), State, execState, modify, runState)
 import Data.Foldable (Foldable (toList))
 import Data.Generics (everywhereM, mkM)
 import Data.Maybe (listToMaybe, mapMaybe)
@@ -120,7 +121,8 @@ rewriteFunBind :: TcRef UpdateEnv -> HsBindLR GhcTc GhcTc -> TcM (HsBindLR GhcTc
 rewriteFunBind updateEnv b@(FunBind {fun_id = (L loc fid), fun_ext = (wrapper, ctick), fun_matches = MG {mg_ext = (MatchGroupTc args res _)}}) = do
   let old_ty = varType fid
   let wrapped = hsWrapperType wrapper $ mkScaledFunTys args res
-  let old_vars = mapMaybe namedBinderVar $ fst $ splitPiTys old_ty
+  let (old_binders, _) = splitPiTys old_ty
+  let old_vars = mapMaybe namedBinderVar old_binders
   let w_vars = mapMaybe namedBinderVar $ fst $ splitPiTys wrapped
   let maybe_subst = tcUnifyTys (matchBindFun (mkVarSet w_vars)) (mkTyCoVarTys w_vars) (mkTyCoVarTys old_vars)
   wrapper_res <- removePlaceholdersFromWrapper wrapper
@@ -128,6 +130,14 @@ rewriteFunBind updateEnv b@(FunBind {fun_id = (L loc fid), fun_ext = (wrapper, c
     (Nothing, _) -> return b
     (_, Nothing) -> failTcM $ text "Failed to unify fun type"
     (Just (wrapper', theta, last_tv), Just subst) -> do
+      forM_ old_binders $ \case
+        Anon {} -> return ()
+        Named bndr
+          | isVisibleForAllTyBinder bndr ->
+              failTcM $
+                text "Adding total constraints to visible foralls is not supported:"
+                  $$ ppr old_ty
+          | otherwise -> return ()
       let theta' = substTheta subst theta
       last_tv' <- case substTyVar subst last_tv of
         TyVarTy tv -> return tv
@@ -143,7 +153,7 @@ rewriteFunBind updateEnv b@(FunBind {fun_id = (L loc fid), fun_ext = (wrapper, c
     add_flag flag = modify (flag :) >> return flag
 
     get_flags :: Type -> [ForAllTyFlag]
-    get_flags ty = snd $ everywhereM (mkM add_flag) ty `runState` []
+    get_flags ty = execState (everywhereM (mkM add_flag) ty) []
 
     set_flag :: ForAllTyFlag -> State [ForAllTyFlag] ForAllTyFlag
     set_flag _ = do
@@ -175,7 +185,7 @@ removePlaceholdersFromWrapper wrapper = do
   newArgsRef <- newTcRef []
   wrapper' <- everywhereM (mkM (rewriteWpLet newArgsRef)) wrapper
   tys <- readTcRef newArgsRef
-  res <- case tys of
+  case tys of
     [] -> return Nothing
     [[]] -> return Nothing
     [new_ev_vars] -> do
@@ -183,7 +193,6 @@ removePlaceholdersFromWrapper wrapper = do
       (tv, wrapper'') <- rewriteLastTyLamAfter new_ev_vars target_tv wrapper'
       return $ Just (wrapper'', map evVarPred new_ev_vars, tv)
     _ -> failTcM $ text "encountered multiple zonked WpLet, this should not happen"
-  return res
 
 rewriteWpLet :: TcRef [[EvVar]] -> HsWrapper -> TcM HsWrapper
 rewriteWpLet newArgsRef (WpLet ev_binds) = do
@@ -215,7 +224,7 @@ findLastTyLamOfSet preds w = case go w of
   Just tv -> return tv
   where
     vars = tyCoVarsOfTypes preds
-    
+
     go (WpCompose w1 w2) = case go w2 of
       Nothing -> go w1
       Just tv -> Just tv

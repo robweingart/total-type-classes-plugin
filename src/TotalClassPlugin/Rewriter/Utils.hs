@@ -66,7 +66,9 @@ printWrapper n w@(WpFun l r arg) = do
   output' (n + 1) "arg: " arg
   printWrapper (n + 1) l
   printWrapper (n + 1) r
-printWrapper n w@(WpCast _) = output' n "WpCast" w
+printWrapper n w@(WpCast co) = do
+  output' n "WpCast" w
+  output' (n + 1) "coercion: " co
 printWrapper n w@(WpEvLam evvar) = do
   output' n "WpEvLam" w
   output' (n + 1) "EvVar: " evvar
@@ -106,7 +108,7 @@ printWrapper n w@(WpLet ev_binds) = do
       printEvBinds (n + 2) ebm
 printWrapper n w@(WpMultCoercion _) = output' n "WpMultCoercion" w
 
-printEvBinds :: Int -> (Bag EvBind) -> TcM ()
+printEvBinds :: Int -> Bag EvBind -> TcM ()
 printEvBinds n binds = do
   forM_ binds $ \(EvBind lhs rhs _) -> do
     output' (n + 2) "LHS: " lhs

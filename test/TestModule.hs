@@ -1,6 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -12,6 +13,7 @@
 {-# OPTIONS_GHC -dcore-lint #-}
 {-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 {-# OPTIONS_GHC -Wno-unused-pattern-binds #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 
 module TestModule where
 
@@ -316,21 +318,34 @@ instance C Z y where
 instance (C n y) => C (S n) y where
   showN = "." ++ showN @n @y
 
+-- f :: forall (m :: MyNat) (n :: MyNat). C m n => String
+-- f =  showN @m @n ++ f @(S m) @(S n)
+
+-- g :: forall (m :: MyNat) (n :: MyNat). C m n => String
+-- g =  showN @m @n ++ f @(S m) @(S n)
+
 testRankNCall :: String
 testRankNCall = go testSimple
   where
     go :: (forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String) -> String
     go f = f (Proxy :: Proxy "testRankNCall")
 
+testVis1 :: forall (s :: Symbol) -> KnownSymbol s => String
+testVis1 (type s) = testSimple (Proxy :: Proxy s)
+
+--testVis2 :: forall (s :: Symbol) -> String
+--testVis2 (type s) = testSimple (Proxy :: Proxy s)
+
+testVisCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
+testVisCall1 (Proxy :: Proxy s) = testVis1 (type s)
+
+testVisCall2 :: forall (s :: Symbol). Proxy s -> String
+testVisCall2 (Proxy :: Proxy s) = testVis1 (type s)
+
+
 plus :: MyNat -> MyNat -> MyNat
 plus Z y = y
 plus (S x) y = S (plus x y)
-
--- f :: forall (m :: MyNat) (n :: MyNat). C m n => String
--- f =  showN @m @n ++ f @(S m) @(S n)
-
--- g :: forall (m :: MyNat) (n :: MyNat). C m n => String
--- g =  showN @m @n ++ f @(S m) @(S n)
 
 vlength' :: (IsNat n) => Vec n a -> MyNat
 vlength' (_ :: Vec n a) = toNat @n

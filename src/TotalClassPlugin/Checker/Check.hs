@@ -9,12 +9,11 @@ import Data.Foldable (Foldable (toList))
 import Data.Functor.Compose (Compose (Compose, getCompose))
 import Data.Maybe (isJust)
 import GHC (Class)
-import GHC.Core.Class (Class (className))
 import GHC.Core.InstEnv (ClsInst (..), getPotentialUnifiers, instanceBindFun, lookupInstEnv, instanceHead)
 import GHC.Core.Predicate (Pred (ClassPred), classifyPredType, mkClassPred)
 import GHC.Core.TyCo.Rep (Type (..))
 import GHC.Core.Unify (UnifyResultM (..), tcMatchTys, tcUnifyTysFG)
-import GHC.Data.Bag (Bag, emptyBag, mapBagM, headMaybe)
+import GHC.Data.Bag (emptyBag, headMaybe)
 import GHC.HsToCore.Binds (dsTopLHsBinds)
 import GHC.HsToCore.Monad (initDsTc)
 import GHC.Plugins
@@ -25,12 +24,11 @@ import GHC.Tc.Module (rnTopSrcDecls, tcTopSrcDecls)
 import GHC.Tc.Solver (captureTopConstraints, solveWanteds)
 import GHC.Tc.Solver.Monad (runTcS)
 import GHC.Tc.Types (TcGblEnv (tcg_binds), TcM, getLclEnvTcLevel)
-import GHC.Tc.Types.Constraint (Implication (ic_binds), isSolvedWC, mkImplicWC, mkSimpleWC)
-import GHC.Tc.Types.Evidence (EvBind, EvBindsVar (..), evBindMapBinds)
+import GHC.Tc.Types.Constraint (isSolvedWC, mkImplicWC, mkSimpleWC)
 import GHC.Tc.Types.Origin (CtOrigin (..), SkolemInfoAnon (UnkSkol), unkSkol)
 import GHC.Tc.Utils.Env (tcExtendIdEnv, tcGetInstEnvs)
 import GHC.Tc.Utils.Instantiate (instDFunType, newWanteds, tcInstSkolTyVars)
-import GHC.Tc.Utils.Monad (getLclEnv, readTcRef)
+import GHC.Tc.Utils.Monad (getLclEnv)
 import qualified GHC.Tc.Utils.Monad as TcM
 import GHC.Tc.Utils.TcMType (newEvVars)
 import GHC.Tc.Utils.Unify (buildImplicationFor)
@@ -42,7 +40,7 @@ import qualified Language.Haskell.TH.Syntax as TH
 import TotalClassPlugin.Checker.CM
 import TotalClassPlugin.Checker.Errors (checkDsResult, checkQuasiError, checkTcRnResult, TotalFailureDetails (..))
 import TotalClassPlugin.Checker.TH (mkEvidenceFun)
-import TotalClassPlugin.Rewriter.Utils (failTcM, outputTcM)
+import TotalClassPlugin.Rewriter.Utils (failTcM)
 import GHC.Tc.Utils.TcType (ltPatersonSize, pSizeClassPred, mkSpecSigmaTy, PatersonSize, pSizeType)
 import GHC.Tc.Errors (reportUnsolved)
 import GHC.Types.Error (Messages(getMessages), MsgEnvelope (errMsgDiagnostic, MsgEnvelope))
@@ -52,8 +50,6 @@ checkConstraint tvs givens cls args fail_on_err = runCM fail_on_err (mkSpecSigma
 
 checkConstraint' :: [TyVar] -> [PredType] -> Class -> [Type] -> CM ()
 checkConstraint' tvs givens cls args = do
-  -- liftTcM $ outputTcM "checking total constraint: " (mkSpecSigmaTy tvs givens (mkClassPred cls args))
-  -- liftTcM $ outputTcM "class: " (className cls)
   (subst, vars) <- liftTcM $ tcInstSkolTyVars unkSkol tvs
   givens' <- liftTcM $ newEvVars (substTys subst givens)
   let tys = substTys subst args
@@ -68,14 +64,9 @@ get_all_unifiers cls tys = do
   inst_envs <- tcGetInstEnvs
   let (successful, potential, _) = lookupInstEnv False inst_envs cls tys
   return $ (fst <$> successful) ++ getPotentialUnifiers potential
---
--- get_ev_binds :: EvBindsVar -> TcM (Bag EvBind)
--- get_ev_binds (CoEvBindsVar {}) = return $ emptyBag
--- get_ev_binds (EvBindsVar {ebv_binds = var}) = evBindMapBinds <$> readTcRef var
 
 check_instance :: [EvVar] -> Class -> [Type] -> [TcTyVar] -> ClsInst -> CM [Type]
 check_instance givens cls tys vars inst = do
-  -- liftTcM $ outputTcM "instance: " $ instanceHead inst
   let res = tcUnifyTysFG instanceBindFun (is_tys inst) tys
   case res of
     Unifiable subst_inst -> do
@@ -87,13 +78,10 @@ check_instance givens cls tys vars inst = do
       case remaining of
         [] -> return ()
         _ -> do
-          -- liftTcM $ outputTcM "remaining constraints: " remaining
           tc_level <- liftTcM $ getLclEnvTcLevel <$> getLclEnv
           wanteds <- liftTcM $ newWanteds (GivenOrigin (UnkSkol emptyCallStack)) remaining
           (implications, _) <- liftTcM $ buildImplicationFor tc_level (UnkSkol emptyCallStack) vars givens (mkSimpleWC wanteds)
           (wcs, _) <- liftTcM $ runTcS $ solveWanteds (mkImplicWC implications)
-          -- liftTcM $ outputTcM "remaining wcs: " wcs
-          -- liftTcM $ outputTcM "ev binds: " =<< mapBagM (get_ev_binds . ic_binds) implications
           unless (isSolvedWC wcs) $ do
             (_, msgs) <- liftTcM $ TcM.tryTc $ reportUnsolved wcs
             case headMaybe (getMessages msgs) of
@@ -132,7 +120,6 @@ check_evidence_fun cls decs = do
       Right ev_fun_binds -> return ev_fun_binds
     (group, Nothing) <- findSplice ev_fun_binds
     (gbl_rn, rn_group) <- TcM.updGblEnv (\env -> env {tcg_binds = emptyBag}) $ rnTopSrcDecls group
-    -- outputTcM "evidence fun:" rn_group
     ((gbl_tc, _), _) <- captureTopConstraints $ TcM.setGblEnv gbl_rn $ tcTopSrcDecls rn_group
     (_, _, binds, _, _, _) <- TcM.setGblEnv gbl_tc $ zonkTopDecls emptyBag (tcg_binds gbl_tc) [] [] []
     return binds

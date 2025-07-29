@@ -33,7 +33,6 @@ printBndrTys ty = do
     _ -> return ()
   forM_ bndrs $ \case
     Named (Bndr var _) -> outputTcM "ty var in bndr: " $ varUnique var
-    -- Anon _ arg -> outputTcM "anon bndr: " arg
     Anon (Scaled _ (TyConApp _ [TyVarTy var])) _ -> outputTcM "ty var in bndr app: " $ varUnique var
     _ -> return ()
 

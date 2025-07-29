@@ -5,7 +5,7 @@
 module TotalClassPlugin.Checker.CM ( CheckResult, CheckState, CM, CheckName (..), successfulResult, failCM, maybeFailCM, runCM, liftTcM, getOriginalConstraint ) where
 
 import GHC.Tc.Types (TcM)
-import TotalClassPlugin.Checker.Errors (TotalClassCheckerMessage (..), failWithTotal, TotalFailureDetails)
+import TotalClassPlugin.Checker.Errors (failWithTotal, TotalFailureDetails)
 import Control.Monad.State (StateT (..), get, MonadState (..), lift)
 import Control.Monad.Reader (ReaderT (runReaderT), MonadReader (ask))
 import GHC (PredType)

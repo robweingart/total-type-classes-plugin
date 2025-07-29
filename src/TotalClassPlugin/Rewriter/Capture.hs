@@ -4,7 +4,7 @@
 module TotalClassPlugin.Rewriter.Capture (captureAndUpdateBind, captureAndUpdateMatch, captureConstraints, wrapperLams, addToWpLet) where
 
 import Data.Generics (Data (gmapM), GenericM)
-import GHC (AbsBinds (..), GhcTc, HsBind, HsBindLR (..), Pat (..), ConPatTc (..), Match (..), LHsExpr, LPat, GRHSs (GRHSs), dataConCantHappen, XXPatGhcTc (..))
+import GHC (AbsBinds (..), GhcTc, HsBind, HsBindLR (..), Pat (..), ConPatTc (..), Match (..), LHsExpr, LPat, dataConCantHappen, XXPatGhcTc (..))
 import GHC.Data.Bag (unionBags)
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Stack (emptyCallStack)

@@ -32,6 +32,5 @@ solveWithPlaceholder ct = do
       (wc, _) <- unsafeTcPluginTcM $ runTcS $ solveWanteds (mkSimpleWC [ctEvidence newCt])
       if isSolvedWC wc
         then do
-          -- tcPluginIO $ putStrLn ("Inserting placeholder:" ++ showPprUnsafe predType)
           return $ Just (mkPlaceholder predType, ct)
         else return Nothing

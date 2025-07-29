@@ -11,22 +11,21 @@
 {-# LANGUAGE TypeApplications #-}
 {-# OPTIONS_GHC -dcore-lint #-}
 {-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
+{-# OPTIONS_GHC -Wno-unused-pattern-binds #-}
 
 module TestModule where
 
 import Data.Proxy
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
-import TotalClassPlugin (TotalConstraint (..), checkTotality)
+import TotalClassPlugin (TotalConstraint (..))
 
 testBaseline :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testBaseline x = symbolVal x
 
---
 -- Function requiring rewrite
 testSimple :: forall (s :: Symbol). Proxy s -> String
 testSimple x = symbolVal x
 
---
 -- Function requiring rewrite
 testExposedSimple :: forall (s :: Symbol). Proxy s -> String
 testExposedSimple x = symbolVal x
@@ -35,12 +34,10 @@ testExposedSimple x = symbolVal x
 testExposedCall1 :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testExposedCall1 x = testSimple x
 
---
 -- Call to rewritten function, caller will also need rewrite
 testExposedCall2 :: forall (s :: Symbol). Proxy s -> String
 testExposedCall2 x = testSimple x
 
---
 -- Call to rewritten function, caller already has constraint
 testCall1 :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testCall1 x = testSimple x
@@ -49,7 +46,6 @@ testCall1 x = testSimple x
 testCall2 :: forall (s :: Symbol). Proxy s -> String
 testCall2 x = testSimple x
 
---
 -- Multiple uses of the same missing constraint
 testSimples1 :: forall (s :: Symbol). Proxy s -> String
 testSimples1 x = symbolVal x ++ " " ++ symbolVal x
@@ -98,6 +94,7 @@ testCalls5 x y = testSimple x ++ " " ++ testSimple y
 testCalls6 :: forall (s1 :: Symbol) (s2 :: Symbol). (KnownSymbol s2) => Proxy s1 -> Proxy s2 -> String
 testCalls6 x y = testSimple x ++ " " ++ testSimple y
 
+-- As above, with another layer of rewriting
 testCalls'1 :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testCalls'1 x = testSimples1 x
 
@@ -128,11 +125,10 @@ testWeirdOrderCalls1 x y = testSimple x ++ " " ++ testSimple y
 testWeirdOrderCalls2 :: forall (s1 :: Symbol). (KnownSymbol s1) => forall (s2 :: Symbol). Proxy s1 -> Proxy s2 -> String
 testWeirdOrderCalls2 x y = testSimple x ++ " " ++ testSimple y
 
--- Calling a function with weith binder order
+-- Calling a function with weird binder order
 testWeirdOrderCalls3 :: forall (s1 :: Symbol). forall (s2 :: Symbol). Proxy s1 -> Proxy s2 -> String
 testWeirdOrderCalls3 x y = testWeirdOrderCalls2 x y
 
---
 -- Cast the called function to its rewritten type
 testPolyCastCall1 :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testPolyCastCall1 x = (testSimple :: forall (s' :: Symbol). (KnownSymbol s') => Proxy s' -> String) x
@@ -149,25 +145,23 @@ testMonoCastCall1 (x :: Proxy s) = (testSimple :: (KnownSymbol s) => Proxy s -> 
 testMonoCastCall2 :: forall (s :: Symbol). Proxy s -> String
 testMonoCastCall2 (x :: Proxy s) = (testSimple :: (KnownSymbol s) => Proxy s -> String) x
 
---
 -- Cast the called function to its old type
 testPolyCastCall'1 :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testPolyCastCall'1 x = (testSimple :: forall (s' :: Symbol). Proxy s' -> String) x
 
----- Cast the called function to its old type
+-- Cast the called function to its old type
 testPolyCastCall'2 :: forall (s :: Symbol). Proxy s -> String
 testPolyCastCall'2 x = (testSimple :: forall (s' :: Symbol). Proxy s' -> String) x
 
---
----- Cast the called function to its old type with a known type param
+-- Cast the called function to its old type with a known type param
 testMonoCastCall'1 :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testMonoCastCall'1 (x :: Proxy s) = (testSimple :: Proxy s -> String) x
 
---
----- Cast the called function to its old type with a known type param
+-- Cast the called function to its old type with a known type param
 testMonoCastCall'2 :: forall (s :: Symbol). Proxy s -> String
 testMonoCastCall'2 (x :: Proxy s) = (testSimple :: Proxy s -> String) x
 
+-- Eta reduced calls
 testEtaSimple :: forall (s :: Symbol). Proxy s -> String
 testEtaSimple = symbolVal
 
@@ -177,6 +171,7 @@ testEtaCall1 = testSimple
 testEtaCall2 :: forall (s :: Symbol). Proxy s -> String
 testEtaCall2 = testSimple
 
+-- Nested polymorphic function
 testNestedPolySimple :: forall (s :: Symbol). Proxy s -> String
 testNestedPolySimple x = goPolySimple x
   where
@@ -228,6 +223,7 @@ testNestedInferredCall2 x = goInferredCall2 x
   where
     goInferredCall2 x' = testSimple x'
 
+-- Rewriting call wrapped in lambda
 testLambdaSimple :: forall (s :: Symbol). Proxy s -> String
 testLambdaSimple = \x -> symbolVal x
 
@@ -237,15 +233,13 @@ testLambdaCall1 = \x -> testSimple x
 testLambdaCall2 :: forall (s :: Symbol). Proxy s -> String
 testLambdaCall2 = \x -> testSimple x
 
---
+-- Rewriting at an explicit type applications
 testExpAppSimple :: forall (s :: Symbol). Proxy s -> String
 testExpAppSimple x = symbolVal @s x
 
---
 testExpAppCall1 :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testExpAppCall1 x = testSimple @s x
 
---
 testExpAppCall2 :: forall (s :: Symbol). Proxy s -> String
 testExpAppCall2 x = testSimple @s x
 
@@ -267,12 +261,14 @@ testExpAppCalls'5 x y = testSimples5 @s1 @s2 x y
 testExpAppCalls'6 :: forall (s1 :: Symbol) (s2 :: Symbol). (KnownSymbol s1, KnownSymbol s2) => Proxy s1 -> Proxy s2 -> String
 testExpAppCalls'6 x y = testSimples6 @s1 @s2 x y
 
+-- More unusual binder orders
 testArgBeforeTy :: () -> forall (s :: Symbol). Proxy s -> String
 testArgBeforeTy () x = symbolVal x
 
 testArgBeforeTy' :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testArgBeforeTy' x = testArgBeforeTy () x
 
+-- Nested eta reduced functions
 testNestedEtaSimple :: forall (s :: Symbol). Proxy s -> String
 testNestedEtaSimple x = go x
   where
@@ -320,8 +316,6 @@ instance C Z y where
 instance (C n y) => C (S n) y where
   showN = "." ++ showN @n @y
 
--- instance TotalConstraint (C x y)
---
 testRankNCall :: String
 testRankNCall = go testSimple
   where
@@ -332,18 +326,18 @@ plus :: MyNat -> MyNat -> MyNat
 plus Z y = y
 plus (S x) y = S (plus x y)
 
+-- f :: forall (m :: MyNat) (n :: MyNat). C m n => String
+-- f =  showN @m @n ++ f @(S m) @(S n)
+
+-- g :: forall (m :: MyNat) (n :: MyNat). C m n => String
+-- g =  showN @m @n ++ f @(S m) @(S n)
+
 vlength' :: (IsNat n) => Vec n a -> MyNat
 vlength' (_ :: Vec n a) = toNat @n
 
 data VecSomeLength a where
   VecSomeLength :: (IsNat n) => Vec n a -> VecSomeLength a
 
---
--- sumLengths :: [VecSomeLength a] -> MyNat
--- sumLengths vs = foldr plus_length Z vs
--- where
---   plus_length :: VecSomeLength a -> MyNat -> MyNat
---   plus_length (VecSomeLength v) n = vlength v `plus` n
 data VecList a where
   VLNil :: VecList a
   VLCons :: (IsNat n) => Vec n a -> VecList a -> VecList a
@@ -378,12 +372,6 @@ data WrappedIsNat n where WrappedIsNat :: IsNat n => WrappedIsNat n
 letExistential :: WrappedIsNat n -> Vec n a -> MyNat
 letExistential x v = let WrappedIsNat = x in vlength v
 
--- f :: forall (m :: MyNat) (n :: MyNat). C m n => String
--- f =  showN @m @n ++ f @(S m) @(S n)
-
--- g :: forall (m :: MyNat) (n :: MyNat). C m n => String
--- g =  showN @m @n ++ f @(S m) @(S n)
-
 examples :: Vec n String -> MyNat
 examples v =        vlLocal v 
              `plus` vlLambda v 
@@ -391,8 +379,8 @@ examples v =        vlLocal v
              `plus` vlTypeApplied v 
              `plus` vlExprSig v
   where
-    vlLocal v = vlength v
-    vlLambda = \v -> vlength v
+    vlLocal v' = vlength v'
+    vlLambda = \v' -> vlength v'
     vlEtaReduced = vlength
     vlTypeApplied = vlength @_ @String
     vlExprSig = vlength :: forall m. Vec m String -> MyNat

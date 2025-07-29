@@ -14,7 +14,6 @@ import GHC.Plugins
 import GHC.Tc.Errors.Types (THError (ReportCustomQuasiError), TcRnMessage (..), TcRnMessageDetailed (..), mkTcRnUnknownMessage)
 import GHC.Tc.Gen.Splice (runQuasi)
 import GHC.Tc.Types (TcM, TcRn)
-import GHC.Tc.Types.Constraint (WantedConstraints)
 import GHC.Tc.Utils.Monad (addMessages, failWithTc, tryTc)
 import GHC.Tc.Utils.TcType (PatersonCondFailure, PatersonCondFailureContext (InInstanceDecl))
 import GHC.Types.Error (DecoratedSDoc, HasDefaultDiagnosticOpts (defaultOpts), Messages (..), MsgEnvelope (..), NoDiagnosticOpts (NoDiagnosticOpts), mkSimpleDecorated, unionDecoratedSDoc)
@@ -65,7 +64,6 @@ checkQuasiError original thing_inside = do
   case result of
     Just x -> return $ Right x
     Nothing -> do
-      -- outputTcM "TH errors: " msgs
       let (fatal, check_failure) = partitionBagWith get_th_msg $ mapMaybeBag get_th_error $ getMessages msgs
       case (headMaybe fatal, headMaybe check_failure) of
         (Nothing, Nothing) -> do

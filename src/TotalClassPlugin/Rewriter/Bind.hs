@@ -29,7 +29,6 @@ rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv,
 rewriteBinds binds cont = do
   updateEnv <- newTcRef emptyDNameEnv
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds
-  -- outputFullTcM "Binds: " binds'
   top_ev_binds <- tcg_ev_binds <$> getGblEnv
   when (any (isPlaceholder . eb_rhs) top_ev_binds) $ failTcM $ text "Found placeholder in top-level ev binds: " <+> ppr top_ev_binds
   updates <- readTcRef updateEnv
@@ -53,7 +52,6 @@ rewriteXHsBindsLR
           }
         )
     ) = do
-    -- printLnTcM "rewriteXHsBindsLR {"
     newUpdateEnv <- newTcRef emptyDNameEnv
     inner_binds' <- mapM (wrapLocMA (rewriteFunBind newUpdateEnv)) inner_binds
     (added_ev_vars, ev_binds') <- mapAccumM rewrite_ev_binds [] ev_binds
@@ -214,9 +212,6 @@ isNotPlaceholder (EvBind {eb_lhs = evVar, eb_rhs = evTerm})
 findLastTyLamOfSet :: [PredType] -> HsWrapper -> TcM TyVar
 findLastTyLamOfSet preds w = case go w of
   Nothing -> do
-    -- printLnTcM "Rewrote wrapper with no TyLam"
-    -- printWrapper 1 w
-    -- outputTcM "TyCoVars: " vars
     failTcM (text "Variables appearing in added constraints" <+> ppr preds <+> text "are not bound here")
   Just tv -> return tv
   where

@@ -5,10 +5,10 @@
 
 module TotalClassPlugin.Rewriter.Call (rewriteCalls) where
 
-import Control.Monad (unless, when, forM, forM_)
+import Control.Monad (unless, when)
 import Data.Generics (Data (gmapM), GenericM, everything, extM, mkQ)
 import Data.Maybe (isJust)
-import GHC (GhcTc, HsExpr (..), HsWrap (HsWrap), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (..), mkHsWrap, LPat, LMatch)
+import GHC (GhcTc, HsExpr (..), HsWrap (HsWrap), LHsBind, LHsBinds, LHsExpr, XXExprGhcTc (..), mkHsWrap, LMatch)
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.TyCo.Subst (elemSubst)
 import GHC.Data.Bag (emptyBag)
@@ -36,7 +36,6 @@ rewriteCalls ids binds cont
       checkNoPlaceholders binds
       getEnvs
   | otherwise = do
-      -- forM_ ids $ outputTcM ""
       (binds', lie) <- captureTopConstraints $ rewriteCallsIn ids binds
       (gbl, lcl) <- getEnvs
       new_ev_binds <- restoreEnvs (gbl, lcl) $ simplifyTop lie
@@ -83,7 +82,6 @@ rewriteWrapExpr updates inside outer = do
     _ -> gmapM inside outer
   where
     go_outer = do
-      -- outputFullTcM "go_outer " outer
       let old_ty = hsExprType outer
       (expr', maybe_update) <- go outer
       let new_ty = hsExprType expr'
@@ -122,7 +120,6 @@ rewriteWrapExpr updates inside outer = do
         (Just _, Just _) -> failTcM $ text "two updates?"
         (Just (final_wrap, added_theta, last_tv), Nothing) -> return (final_wrap, Just (UpdateToApply {uta_origin = ExprSigOrigin, uta_new_theta = added_theta, uta_last_ty_var = last_tv}, emptySubst))
       let new_expr = XExpr (WrapExpr (HsWrap final_wrap new_inner))
-      -- outputTcM "subst" (snd <$> maybe_update)
       return (new_expr, maybe_update)
     go (HsAppType ty old_inner tok wc_type) = do
       (new_inner, maybe_update) <- wrapLocFstMA go old_inner
@@ -137,7 +134,6 @@ rewriteWrapExpr updates inside outer = do
     go (HsVar x (L l var))
       | Just update <- lookupDNameEnv updates $ varName var = do
           let new_ty = idType (new_id update)
-          -- outputTcM "starting update: " update
           return ((HsVar x (L l (setVarType var new_ty))), Just (UpdateToApply {uta_origin = OccurrenceOf (varName var), uta_new_theta = new_theta update, uta_last_ty_var = last_ty_var update}, emptySubst))
     go (HsApp x f arg) = do
       (new_f, f_update) <- wrapLocFstMA go f
@@ -166,7 +162,6 @@ mk_ev_apps subst update = do
   let unassigned_vars = filterVarSet (`notElemSubst` subst) vars
   unless (isEmptyVarSet unassigned_vars) $ failTcM $ text "the following vars from the called function's type have not been applied at this insertion point:" <+> ppr unassigned_vars
   let theta = substTheta subst (uta_new_theta update)
-  -- outputTcM "Emitting constraints: " theta
   instCallConstraints (uta_origin update) theta
 
 mk_ev_apps_for_update :: Subst -> Maybe (UpdateToApply, Subst) -> TcM (Either (UpdateToApply, Subst) HsWrapper)
@@ -174,8 +169,6 @@ mk_ev_apps_for_update _ Nothing = return $ Right WpHole
 mk_ev_apps_for_update new_subst (Just (update, old_subst))
   | elemSubst (uta_last_ty_var update) subst = do
       new_ev_apps <- mk_ev_apps subst update
-      -- outputTcM "Successfully applied " (update, subst)
-      -- printWrapper 1 new_ev_apps
       return $ Right new_ev_apps
   | otherwise = return $ Left (update, subst)
   where

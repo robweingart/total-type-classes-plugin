@@ -316,20 +316,22 @@ instance TotalConstraint (IsNat n)
 vlength :: Vec n a -> MyNat
 vlength (_ :: Vec n a) = toNat @n
 
-class C (x :: MyNat) (y :: MyNat) where
-  showN :: String
-
-instance C Z y where
-  showN = ""
-
-instance (C n y) => C (S n) y where
-  showN = "." ++ showN @n @y
-
--- f :: forall (m :: MyNat) (n :: MyNat). C m n => String
--- f =  showN @m @n ++ f @(S m) @(S n)
-
--- g :: forall (m :: MyNat) (n :: MyNat). C m n => String
--- g =  showN @m @n ++ f @(S m) @(S n)
+--class C (x :: MyNat) (y :: MyNat) where
+--  showN :: String
+--
+--instance C Z y where
+--  showN = ""
+--
+--instance (C n y) => C (S n) y where
+--  showN = "." ++ showN @n @y
+--
+--instance TotalConstraint (C x y)
+--
+--f :: forall (m :: MyNat) (n :: MyNat). C m n => String
+--f =  showN @m @n ++ f @(S m) @(S n)
+--
+--g :: forall (m :: MyNat) (n :: MyNat). C m n => String
+--g =  showN @m @n ++ f @(S m) @(S n)
 
 testRankNCall :: String
 testRankNCall = go testSimple

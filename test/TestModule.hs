@@ -8,19 +8,22 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeAbstractions #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -dcore-lint #-}
-{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 {-# OPTIONS_GHC -Wno-unused-pattern-binds #-}
-{-# LANGUAGE RequiredTypeArguments #-}
 
 module TestModule where
 
 import Data.Proxy
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 import TotalClassPlugin (TotalConstraint (..))
+
+-- This module contains various examples where the rewriter successfully adds constraints.
+-- Try running `cabal repl` and using the `:t` command to see the final types
 
 testBaseline :: forall (s :: Symbol). (KnownSymbol s) => Proxy s -> String
 testBaseline x = symbolVal x
@@ -340,6 +343,31 @@ testTypeAbsCall1 @s' = testSimple (Proxy :: Proxy s')
 testTypeAbsCall2 :: forall (s :: Symbol). Proxy s -> String
 testTypeAbsCall2 @s' _ = testSimple (Proxy :: Proxy s')
 
+type PlusOne (n :: MyNat) = S n
+
+-- GHC looks through the alias and applies available instances before calling plugins, so here
+-- we will add `IsNat n`, not `IsNat (PlusOne n)` or `IsNat (S n)`
+testTypeAliasCall :: forall (n :: MyNat) a. Vec (PlusOne n) a -> MyNat
+testTypeAliasCall v = vlength v
+
+type family TypeFam (n :: MyNat) a :: MyNat where
+  TypeFam n Bool = n
+  TypeFam n Int = Z
+
+-- The type family will beta-reduced away before the plugin invocation, so we add `IsNat n`
+testReducibleTypeFamilyCall :: forall (n :: MyNat) a. Vec (TypeFam n Bool) a -> MyNat
+testReducibleTypeFamilyCall v = vlength v
+  
+
+type family MinusOne (n :: MyNat) :: MyNat where
+  MinusOne Z = Z
+  MinusOne (S n) = n
+
+-- Here the type family can't be reduced without knowing `n`, so the plugin must add `IsNat (MinusOne n)`
+-- The `Proxy` argument is only there to avoid an ambiguity issue
+testIrreducibleTypeFamilyCall :: forall (n :: MyNat) a. Proxy n -> Vec (MinusOne n) a -> MyNat
+testIrreducibleTypeFamilyCall Proxy v = vlength v
+
 --testVis1 :: forall (s :: Symbol) -> KnownSymbol s => String
 --testVis1 (type s') = testSimple (Proxy :: Proxy s')
 --
@@ -398,10 +426,10 @@ letExistential :: WrappedIsNat n -> Vec n a -> MyNat
 letExistential x v = let WrappedIsNat = x in vlength v
 
 examples :: Vec n String -> MyNat
-examples v =        vlLocal v 
-             `plus` vlLambda v 
-             `plus` vlEtaReduced v 
-             `plus` vlTypeApplied v 
+examples v =        vlLocal v
+             `plus` vlLambda v
+             `plus` vlEtaReduced v
+             `plus` vlTypeApplied v
              `plus` vlExprSig v
   where
     vlLocal v' = vlength v'
@@ -476,13 +504,16 @@ testAll = do
   putStrLn $ testNestedEtaCall1 (Proxy :: Proxy "testNestedEtaCall1")
   putStrLn $ testNestedEtaCall2 (Proxy :: Proxy "testNestedEtaCall2")
   putStrLn $ testRankNCall
-  putStrLn $ testTypeAbsCall1  @"testTypeAbsCall1"
-  putStrLn $ testTypeAbsCall2  (Proxy :: Proxy "testTypeAbsCall2")
-  putStrLn $ show $ vlength ((2 :: Int) :> 3 :> VNil)
-  putStrLn $ show $ sumLengths (VLCons ("a" :> VNil) (VLCons ("b" :> "c" :> VNil) (VLCons ("d" :> VNil) VLNil)))
-  putStrLn $ show $ sumLengths1 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
-  putStrLn $ show $ sumLengths2 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
-  putStrLn $ show $ sumLengthsNice [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
-  putStrLn $ show $ letExistential WrappedIsNat ("a" :> VNil)
+  putStrLn $ testTypeAbsCall1 @"testTypeAbsCall1"
+  putStrLn $ testTypeAbsCall2 (Proxy :: Proxy "testTypeAbsCall2")
+  print $ testTypeAliasCall ((2 :: Int) :> VNil)
+  print $ testReducibleTypeFamilyCall ((2 :: Int) :> VNil)
+  print $ testIrreducibleTypeFamilyCall (Proxy :: Proxy (S (S Z))) ((2 :: Int) :> VNil)
+  print $ vlength ((2 :: Int) :> 3 :> VNil)
+  print $ sumLengths (VLCons ("a" :> VNil) (VLCons ("b" :> "c" :> VNil) (VLCons ("d" :> VNil) VLNil)))
+  print $ sumLengths1 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
+  print $ sumLengths2 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
+  print $ sumLengthsNice [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
+  print $ letExistential WrappedIsNat ("a" :> VNil)
   -- putStrLn $ f @(S Z) @(S (S Z))
   return ()

@@ -14,7 +14,6 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 
 module Check where
 

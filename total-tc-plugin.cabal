@@ -112,6 +112,8 @@ test-suite total-tc-plugin-test
     -- Directories containing source files.
     hs-source-dirs:   test
 
+    ghc-options: -fplugin=TotalClassPlugin.Plugin
+
     -- The entrypoint to the test suite.
     main-is:          Main.hs
 

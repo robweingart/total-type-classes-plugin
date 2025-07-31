@@ -40,6 +40,6 @@ solveWithPlaceholder givens ct = do
         (implications, _) <- buildImplicationFor tc_level (UnkSkol emptyCallStack) [] given_vars (mkSimpleWC [ctEvidence wantedCt])
         runTcS $ solveWanteds (mkImplicWC implications)
       if isSolvedWC wc
-        then do
+        then 
           return $ Just (mkPlaceholder predType, ct)
         else return Nothing

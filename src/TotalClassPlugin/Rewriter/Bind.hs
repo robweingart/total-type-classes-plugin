@@ -16,13 +16,13 @@ import GHC.Data.Bag (filterBagM)
 import GHC.Hs.Syn.Type (hsWrapperType)
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcGblEnv (..), TcLclEnv, TcM, TcRef)
-import GHC.Tc.Types.Evidence (EvBind (EvBind, eb_lhs, eb_rhs), EvBindsVar (CoEvBindsVar, EvBindsVar, ebv_binds), HsWrapper (..), TcEvBinds (EvBinds, TcEvBinds), evBindMapBinds, isIdHsWrapper, (<.>))
+import GHC.Tc.Types.Evidence (EvBind (EvBind, eb_lhs, eb_rhs), EvBindsVar (CoEvBindsVar, EvBindsVar, ebv_binds), EvTerm (EvExpr), HsWrapper (..), TcEvBinds (EvBinds, TcEvBinds), evBindMapBinds, isIdHsWrapper, (<.>))
 import GHC.Tc.Utils.Env (tcExtendGlobalEnvImplicit)
 import GHC.Tc.Utils.Monad (getGblEnv, newTcRef, readTcRef, updGblEnv, updTcRef, wrapLocMA)
 import GHC.Tc.Utils.TcType (evVarPred, mkPhiTy, mkTyCoVarTys, substTy)
 import GHC.Types.Unique.DFM (plusUDFM)
 import TotalClassPlugin.Rewriter.Env
-import TotalClassPlugin.Rewriter.Placeholder (isPlaceholder)
+import TotalClassPlugin.Rewriter.Placeholder (getPlaceholderPredType, isPlaceholder)
 import TotalClassPlugin.Rewriter.Utils
 
 rewriteBinds :: LHsBinds GhcTc -> (UpdateEnv -> LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
@@ -30,7 +30,24 @@ rewriteBinds binds cont = do
   updateEnv <- newTcRef emptyDNameEnv
   binds' <- everywhereM (mkM (rewriteLHsBind updateEnv)) binds
   top_ev_binds <- tcg_ev_binds <$> getGblEnv
-  when (any (isPlaceholder . eb_rhs) top_ev_binds) $ failTcM $ text "Found placeholder in top-level ev binds: " <+> ppr top_ev_binds
+  forM_ top_ev_binds $ \ev_bind -> do
+    let rhs = eb_rhs ev_bind
+    case getPlaceholderPredType rhs of
+      Nothing -> return ()
+      Just predType -> do
+        let fvs = tyCoVarsOfType predType
+        if isEmptyUniqSet fvs
+          then
+            failTcM
+              ( text "Missing constraint matches total constraint but has no free type variables:"
+                  $$ ppr predType
+                  $$ text "Either your constraint is not total, or there is an irreducible type family in the constraint"
+              )
+          else
+            failTcM
+              ( text "bug? Placeholder has free variables but ended up as top-level binding"
+                  $$ ppr predType
+              )
   updates <- readTcRef updateEnv
   updGblEnv (\gbl -> gbl {tcg_binds = binds'}) $ tcExtendGlobalEnvImplicit (map (AnId . new_id) $ toList updates) $ do
     cont updates binds'

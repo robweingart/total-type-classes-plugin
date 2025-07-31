@@ -13,6 +13,7 @@
 {-# LANGUAGE TypeAbstractions #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -dcore-lint #-}
 {-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 {-# OPTIONS_GHC -Wno-unused-pattern-binds #-}
@@ -417,6 +418,18 @@ instance Monoid a => TotalConstraint (ListOfMempty n a) where
 testListOfMempty :: forall (n :: MyNat) a. Monoid a => Proxy n -> Proxy a -> [a]
 testListOfMempty (Proxy :: Proxy n) (Proxy :: Proxy a) = mkListOfMempty @n @a
 
+--type family F (n :: MyNat) :: MyNat
+--
+--class Cl (n :: MyNat) where
+--  m :: String
+--
+--instance IsNat (F n) => Cl n where
+--  m = ""
+--
+--instance TotalConstraint (Cl n)
+--
+--q :: String
+--q = m
 
 plus :: MyNat -> MyNat -> MyNat
 plus Z y = y

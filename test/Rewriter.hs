@@ -384,6 +384,21 @@ testIrreducibleTypeFamilyCall Proxy v = vlength v
 
 
 
+class ListOfFalse (n :: MyNat) a where
+  mkListOfFalse :: [a]
+
+instance ListOfFalse Z a where
+  mkListOfFalse = []
+
+instance ListOfFalse n Bool => ListOfFalse (S n) Bool where
+  mkListOfFalse = False : mkListOfFalse @n
+
+instance TotalConstraint (ListOfFalse n Bool) where
+  _totalConstraintEvidence = checkTotality
+
+testListOfFalse :: forall (n :: MyNat). Proxy n -> [Bool]
+testListOfFalse (Proxy :: Proxy n) = mkListOfFalse @n @Bool
+
 --class ListOfMempty (n :: MyNat) a where
 --  mkList :: [a]
 --
@@ -521,6 +536,7 @@ testAll = do
   print $ testTypeAliasCall ((2 :: Int) :> VNil)
   print $ testReducibleTypeFamilyCall ((2 :: Int) :> VNil)
   print $ testIrreducibleTypeFamilyCall (Proxy :: Proxy (S (S Z))) ((2 :: Int) :> VNil)
+  print $ testListOfFalse (Proxy :: Proxy (S Z))
   -- print $ listOfMempty (Proxy :: Proxy (S Z)) (Proxy :: Proxy (Sum Int))
   print $ vlength ((2 :: Int) :> 3 :> VNil)
   print $ sumLengths (VLCons ("a" :> VNil) (VLCons ("b" :> "c" :> VNil) (VLCons ("d" :> VNil) VLNil)))

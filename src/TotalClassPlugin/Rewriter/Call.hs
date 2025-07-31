@@ -30,7 +30,6 @@ import TotalClassPlugin.Rewriter.Validate (checkNoPlaceholders)
 rewriteCalls :: UpdateEnv -> LHsBinds GhcTc -> (LHsBinds GhcTc -> TcM (TcGblEnv, TcLclEnv)) -> TcM (TcGblEnv, TcLclEnv)
 rewriteCalls ids binds cont
   | isEmptyDNameEnv ids = do
-      printLnTcM "No new modified ids, checking for remaining placeholders"
       checkNoPlaceholders binds
       getEnvs
   | otherwise = do

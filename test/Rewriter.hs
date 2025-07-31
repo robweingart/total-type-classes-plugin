@@ -14,13 +14,15 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -dcore-lint #-}
+{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 {-# OPTIONS_GHC -Wno-unused-pattern-binds #-}
 
-module TestModule where
+module Rewriter where
 
 import Data.Proxy
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
-import TotalClassPlugin (TotalConstraint (..))
+import TotalClassPlugin (TotalConstraint (..), CheckTotality (checkTotality))
+import Data.Monoid (Sum)
 
 -- This module contains various examples where the rewriter successfully adds constraints.
 -- Try running `cabal repl` and using the `:t` command to see the final types
@@ -381,6 +383,23 @@ testIrreducibleTypeFamilyCall Proxy v = vlength v
 --testVisCall2 (Proxy :: Proxy s) = testVis1 (type s)
 
 
+
+--class ListOfMempty (n :: MyNat) a where
+--  mkList :: [a]
+--
+--instance ListOfMempty Z a where
+--  mkList = []
+--
+--instance (Monoid a, ListOfMempty n a) => ListOfMempty (S n) a where
+--  mkList = mempty : mkList @n
+--
+--instance Monoid a => TotalConstraint (ListOfMempty n a) where
+--  _totalConstraintEvidence = checkTotality
+--
+--listOfMempty :: forall (n :: MyNat) a. Monoid a => Proxy n -> Proxy a -> [a]
+--listOfMempty (Proxy :: Proxy n) (Proxy :: Proxy a) = mkList @n @a
+
+
 plus :: MyNat -> MyNat -> MyNat
 plus Z y = y
 plus (S x) y = S (plus x y)
@@ -401,27 +420,18 @@ foldrVecList f z = go
     go VLNil = z
     go (VLCons v vs) = f v (go vs)
 
+-- We can use a rewritten function in the argument of a higher-order function
+-- (but the `IsNat` in `foldrVecList` has to be written manually)
 sumLengths :: VecList a -> MyNat
 sumLengths vs = foldrVecList (\v n -> vlength v `plus` n) Z vs
 
-elimVecSomeLength :: forall a b. (forall n. (IsNat n) => Vec n a -> b) -> VecSomeLength a -> b
-elimVecSomeLength f (VecSomeLength v) = f v
-
-sumLengths1 :: [VecSomeLength a] -> MyNat
-sumLengths1 vs = foldr (\v n -> elimVecSomeLength vlength v `plus` n) Z vs
-
-sumLengths2 :: [VecSomeLength a] -> MyNat
-sumLengths2 = go (\v n -> vlength v `plus` n)
-  where
-    go :: (forall n. (IsNat n) => Vec n a -> MyNat -> MyNat) -> [VecSomeLength a] -> MyNat
-    go _ [] = Z
-    go f (VecSomeLength v : vs) = f v (go f vs)
-
-sumLengthsNice :: [VecSomeLength a] -> MyNat
-sumLengthsNice vs = foldr (\(VecSomeLength v) n -> vlength v `plus` n) Z vs
+-- When rewriting a call, we can use a constraint coming from a GADT constructor, without any type annotation
+sumLengthsInline :: [VecSomeLength a] -> MyNat
+sumLengthsInline vs = foldr (\(VecSomeLength v) n -> vlength v `plus` n) Z vs
 
 data WrappedIsNat n where WrappedIsNat :: IsNat n => WrappedIsNat n
 
+-- We can also use a GADT-wrapped constraint obtained using a `let` binding
 letExistential :: WrappedIsNat n -> Vec n a -> MyNat
 letExistential x v = let WrappedIsNat = x in vlength v
 
@@ -438,6 +448,8 @@ examples v =        vlLocal v
     vlTypeApplied = vlength @_ @String
     vlExprSig = vlength :: forall m. Vec m String -> MyNat
 
+-- We run all of the functions to check they actually work at runtime
+-- (in particular, the KnownSymbol in each one is threaded through correctly)
 testAll :: IO ()
 testAll = do
   putStrLn $ testBaseline (Proxy :: Proxy "testBaseline")
@@ -509,11 +521,10 @@ testAll = do
   print $ testTypeAliasCall ((2 :: Int) :> VNil)
   print $ testReducibleTypeFamilyCall ((2 :: Int) :> VNil)
   print $ testIrreducibleTypeFamilyCall (Proxy :: Proxy (S (S Z))) ((2 :: Int) :> VNil)
+  -- print $ listOfMempty (Proxy :: Proxy (S Z)) (Proxy :: Proxy (Sum Int))
   print $ vlength ((2 :: Int) :> 3 :> VNil)
   print $ sumLengths (VLCons ("a" :> VNil) (VLCons ("b" :> "c" :> VNil) (VLCons ("d" :> VNil) VLNil)))
-  print $ sumLengths1 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
-  print $ sumLengths2 [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
-  print $ sumLengthsNice [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
+  print $ sumLengthsInline [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
   print $ letExistential WrappedIsNat ("a" :> VNil)
   -- putStrLn $ f @(S Z) @(S (S Z))
   return ()

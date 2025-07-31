@@ -4,11 +4,13 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -fplugin=TotalClassPlugin.Plugin #-}
 
 module Demo where
 
 import TotalClassPlugin (TotalConstraint (..))
--- import GHC.Exts (Any)
+
+-- Concise demo of the core functionality, corresponding to the main example from the paper
 
 data Nat = Z | S Nat
 
@@ -17,23 +19,15 @@ data Vec (n :: Nat) a where
   (:>) :: a -> Vec n a -> Vec (S n) a
 
 vlength :: forall n a. Vec n a -> Nat
-vlength (_ :: Vec n a) = natToTerm @n
+vlength (_ :: Vec n a) = toNat @n
 
---
 class IsNat (n :: Nat) where
-  natToTerm :: Nat
+  toNat :: Nat
 
 instance IsNat Z where
-  natToTerm = Z
+  toNat = Z
 
 instance (IsNat n) => IsNat (S n) where
-  natToTerm = S (natToTerm @n)
+  toNat = S (toNat @n)
 
 instance TotalConstraint (IsNat n)
-
--- foo :: a -> String
--- foo x = show x
-
-
--- x :: Nat
--- x = natToTerm @Any

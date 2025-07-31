@@ -23,7 +23,7 @@ solveCt givens ct = do
   res1 <- solveCheck givens ct
   case res1 of
     Just res -> return $ Just res
-    Nothing -> solveWithPlaceholder ct
+    Nothing -> solveWithPlaceholder givens ct
 
 solve :: () -> EvBindsVar -> [Ct] -> [Ct] -> TcPluginM TcPluginSolveResult
 solve () _ _ [] = do

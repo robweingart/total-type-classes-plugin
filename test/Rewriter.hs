@@ -396,23 +396,26 @@ instance ListOfFalse n Bool => ListOfFalse (S n) Bool where
 instance TotalConstraint (ListOfFalse n Bool) where
   _totalConstraintEvidence = checkTotality
 
+-- Because the needed constraint matches the restricted instantiation `ListOfFalse n Bool`,
+-- the total constraint declaration applies and it gets inserted
 testListOfFalse :: forall (n :: MyNat). Proxy n -> [Bool]
 testListOfFalse (Proxy :: Proxy n) = mkListOfFalse @n @Bool
 
---class ListOfMempty (n :: MyNat) a where
---  mkList :: [a]
---
---instance ListOfMempty Z a where
---  mkList = []
---
---instance (Monoid a, ListOfMempty n a) => ListOfMempty (S n) a where
---  mkList = mempty : mkList @n
---
---instance Monoid a => TotalConstraint (ListOfMempty n a) where
---  _totalConstraintEvidence = checkTotality
---
---listOfMempty :: forall (n :: MyNat) a. Monoid a => Proxy n -> Proxy a -> [a]
---listOfMempty (Proxy :: Proxy n) (Proxy :: Proxy a) = mkList @n @a
+class ListOfMempty (n :: MyNat) a where
+  mkListOfMempty :: [a]
+
+instance ListOfMempty Z a where
+  mkListOfMempty = []
+
+instance (Monoid a, ListOfMempty n a) => ListOfMempty (S n) a where
+  mkListOfMempty = mempty : mkListOfMempty @n
+
+instance Monoid a => TotalConstraint (ListOfMempty n a) where
+  _totalConstraintEvidence = checkTotality
+
+-- Because the `Monoid a` precondition is satisfied, `ListOfMempty n a` is inserted
+testListOfMempty :: forall (n :: MyNat) a. Monoid a => Proxy n -> Proxy a -> [a]
+testListOfMempty (Proxy :: Proxy n) (Proxy :: Proxy a) = mkListOfMempty @n @a
 
 
 plus :: MyNat -> MyNat -> MyNat
@@ -537,7 +540,7 @@ testAll = do
   print $ testReducibleTypeFamilyCall ((2 :: Int) :> VNil)
   print $ testIrreducibleTypeFamilyCall (Proxy :: Proxy (S (S Z))) ((2 :: Int) :> VNil)
   print $ testListOfFalse (Proxy :: Proxy (S Z))
-  -- print $ listOfMempty (Proxy :: Proxy (S Z)) (Proxy :: Proxy (Sum Int))
+  print $ testListOfMempty (Proxy :: Proxy (S (S Z))) (Proxy :: Proxy (Sum Int))
   print $ vlength ((2 :: Int) :> 3 :> VNil)
   print $ sumLengths (VLCons ("a" :> VNil) (VLCons ("b" :> "c" :> VNil) (VLCons ("d" :> VNil) VLNil)))
   print $ sumLengthsInline [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]

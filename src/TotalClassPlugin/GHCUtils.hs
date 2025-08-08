@@ -1,5 +1,5 @@
 -- The contents of this file are copied, with slight modification, from the source code of the
--- Glasgow Haskell Compiler, available at https://www.haskell.org/ghc/download_ghc_9_8_2.html,
+-- Glasgow Haskell Compiler, available at https://www.haskell.org/ghc/download_ghc_9_12_2.html,
 -- which is governed by the following license:
 --
 --   The Glasgow Haskell Compiler License

@@ -35,10 +35,10 @@ license:            MIT
 license-file:       LICENSE
 
 -- The package author(s).
-author:             
+author:             Robert Weingart, Nicolas Wu
 
 -- An email address to which users can send suggestions, bug reports, and patches.
-maintainer:         
+maintainer:         rob.weingart@protonmail.com
 
 -- A copyright notice.
 -- copyright:

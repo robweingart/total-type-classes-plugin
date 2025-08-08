@@ -23,6 +23,8 @@ withTcRef initial f = do
   final <- readTcRef ref
   return (final, result)
 
+-- Helpers for debugging
+
 printBndrTys :: Type -> TcM ()
 printBndrTys ty = do
   let (bndrs, ty') = splitInvisPiTys ty

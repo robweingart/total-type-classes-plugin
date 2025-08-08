@@ -3,7 +3,7 @@
 
 module TotalClassPlugin.Rewriter.Bind (rewriteBinds, removePlaceholdersFromWrapper) where
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, unless)
 import Control.Monad.State (MonadState (get, put), State, execState, modify, runState)
 import Data.Foldable (Foldable (toList))
 import Data.Generics (everywhereM, mkM)
@@ -16,7 +16,7 @@ import GHC.Data.Bag (filterBagM)
 import GHC.Hs.Syn.Type (hsWrapperType)
 import GHC.Plugins hiding (TcPlugin)
 import GHC.Tc.Types (TcGblEnv (..), TcLclEnv, TcM, TcRef)
-import GHC.Tc.Types.Evidence (EvBind (EvBind, eb_lhs, eb_rhs), EvBindsVar (CoEvBindsVar, EvBindsVar, ebv_binds), EvTerm (EvExpr), HsWrapper (..), TcEvBinds (EvBinds, TcEvBinds), evBindMapBinds, isIdHsWrapper, (<.>))
+import GHC.Tc.Types.Evidence (EvBind (EvBind, eb_lhs, eb_rhs), EvBindsVar (CoEvBindsVar, EvBindsVar, ebv_binds), HsWrapper (..), TcEvBinds (EvBinds, TcEvBinds), evBindMapBinds, isIdHsWrapper, (<.>))
 import GHC.Tc.Utils.Env (tcExtendGlobalEnvImplicit)
 import GHC.Tc.Utils.Monad (getGblEnv, newTcRef, readTcRef, updGblEnv, updTcRef, wrapLocMA)
 import GHC.Tc.Utils.TcType (evVarPred, mkPhiTy, mkTyCoVarTys, substTy)

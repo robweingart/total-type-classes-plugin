@@ -316,6 +316,8 @@ instance TotalConstraint (IsNat n)
 vlength :: Vec n a -> MyNat
 vlength (_ :: Vec n a) = toNat @n
 
+-- An example that triggers an infinite rewriting loop until the plugin gives up
+-- Uncomment to see the error
 --class C (x :: MyNat) (y :: MyNat) where
 --  showN :: String
 --
@@ -373,20 +375,6 @@ type family MinusOne (n :: MyNat) :: MyNat where
 testIrreducibleTypeFamilyCall :: forall (n :: MyNat) a. Proxy n -> Vec (MinusOne n) a -> MyNat
 testIrreducibleTypeFamilyCall Proxy v = vlength v
 
---testVis1 :: forall (s :: Symbol) -> KnownSymbol s => String
---testVis1 (type s') = testSimple (Proxy :: Proxy s')
---
---testVis2 :: forall (s :: Symbol) -> String
---testVis2 (type s) = testSimple (Proxy :: Proxy s)
---
---testVisCall1 :: forall (s :: Symbol). KnownSymbol s => Proxy s -> String
---testVisCall1 (Proxy :: Proxy s) = testVis1 (type s)
---
---testVisCall2 :: forall (s :: Symbol). Proxy s -> String
---testVisCall2 (Proxy :: Proxy s) = testVis1 (type s)
-
-
-
 class ListOfFalse (n :: MyNat) a where
   mkListOfFalse :: [a]
 
@@ -420,6 +408,8 @@ instance Monoid a => TotalConstraint (ListOfMempty n a) where
 testListOfMempty :: forall (n :: MyNat) a. Monoid a => Proxy n -> Proxy a -> [a]
 testListOfMempty (Proxy :: Proxy n) (Proxy :: Proxy a) = mkListOfMempty @n @a
 
+-- An example where rewriting fails because GHC defaults a type param to `Any`
+-- Uncomment to see the error
 --type family F (n :: MyNat) :: MyNat
 --
 --class Cl (n :: MyNat) where
@@ -560,5 +550,4 @@ testAll = do
   print $ sumLengths (VLCons ("a" :> VNil) (VLCons ("b" :> "c" :> VNil) (VLCons ("d" :> VNil) VLNil)))
   print $ sumLengthsInline [VecSomeLength ("a" :> VNil), VecSomeLength ("b" :> "c" :> VNil), VecSomeLength ("d" :> VNil)]
   print $ letExistential WrappedIsNat ("a" :> VNil)
-  -- putStrLn $ f @(S Z) @(S (S Z))
   return ()

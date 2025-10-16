@@ -1,5 +1,9 @@
 # Total Type Classes
 
+## The paper
+
+https://doi.org/10.1145/3747404
+
 ## Structure
 
 Here is a brief overview of the structure of the code as it relates to the paper.
